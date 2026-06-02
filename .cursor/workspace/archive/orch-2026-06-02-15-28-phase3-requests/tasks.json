@@ -1,0 +1,56 @@
+{
+  "REQ-001": {
+    "id": "REQ-001",
+    "name": "Миграция 009 — схема requests/request_items/request_suppliers + enums + request_code",
+    "status": "completed",
+    "dependencies": []
+  },
+  "REQ-002": {
+    "id": "REQ-002",
+    "name": "Миграция 010 — RLS запросов (изоляция поставщиков)",
+    "status": "completed",
+    "dependencies": ["REQ-001"]
+  },
+  "REQ-003": {
+    "id": "REQ-003",
+    "name": "Модуль расчёта дедлайна src/lib/deadline.ts (unit-тесты)",
+    "status": "completed",
+    "dependencies": []
+  },
+  "REQ-004": {
+    "id": "REQ-004",
+    "name": "Server actions — создание черновика и отправка запроса",
+    "status": "completed",
+    "dependencies": ["REQ-001", "REQ-002", "REQ-003"]
+  },
+  "REQ-005": {
+    "id": "REQ-005",
+    "name": "Выбор поставщиков (дерево/группы + учёт works_in_zapros)",
+    "status": "completed",
+    "dependencies": ["REQ-001", "REQ-002"]
+  },
+  "REQ-006": {
+    "id": "REQ-006",
+    "name": "UI «Создать запрос» из карточки задачи (превью → отправка)",
+    "status": "completed",
+    "dependencies": ["REQ-004", "REQ-005"]
+  },
+  "REQ-007": {
+    "id": "REQ-007",
+    "name": "Список/карточка запроса у снабженца",
+    "status": "completed",
+    "dependencies": ["REQ-004"]
+  },
+  "REQ-008": {
+    "id": "REQ-008",
+    "name": "Реальный счётчик запросов на задаче",
+    "status": "completed",
+    "dependencies": ["REQ-004"]
+  },
+  "REQ-009": {
+    "id": "REQ-009",
+    "name": "Добавить поставщика после отправки",
+    "status": "completed",
+    "dependencies": ["REQ-004", "REQ-005", "REQ-006"]
+  }
+}

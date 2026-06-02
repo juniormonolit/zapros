@@ -1,0 +1,12 @@
+{
+  "id": "orch-2026-06-02-phase5-communication",
+  "name": "Phase 5 Communication (F006)",
+  "status": "completed",
+  "started": "2026-06-02T00:00:00Z",
+  "lastUpdated": "2026-06-02T23:30:00Z",
+  "tasksTotal": 10,
+  "tasksCompleted": 10,
+  "currentTask": null,
+  "mode": "documentation",
+  "sourceFile": null
+}

@@ -1,0 +1,13 @@
+{
+  "id": "orch-2026-06-02-phase4-supplier-responses",
+  "name": "Phase 4 — Supplier responses (F004)",
+  "status": "in_progress",
+  "mode": "documentation",
+  "started": "2026-06-02T12:00:00Z",
+  "lastUpdated": "2026-06-02T20:30:00Z",
+  "tasksTotal": 9,
+  "tasksCompleted": 3,
+  "currentTask": "RSP-005",
+  "feature": "F004",
+  "phase": 4
+}

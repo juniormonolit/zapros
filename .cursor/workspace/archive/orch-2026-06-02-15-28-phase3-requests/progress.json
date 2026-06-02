@@ -1,0 +1,23 @@
+{
+  "id": "orch-2026-06-02-15-28-phase3-requests",
+  "name": "Фаза 3 — Запросы (создание и отправка)",
+  "status": "completed",
+  "started": "2026-06-02T15:28:00Z",
+  "lastUpdated": "2026-06-02T16:11:00Z",
+  "tasksTotal": 9,
+  "tasksCompleted": 9,
+  "currentTask": null,
+  "tasks": {
+    "REQ-001": "completed",
+    "REQ-002": "completed",
+    "REQ-003": "completed",
+    "REQ-004": "completed",
+    "REQ-005": "completed",
+    "REQ-006": "completed",
+    "REQ-007": "completed",
+    "REQ-008": "completed",
+    "REQ-009": "completed"
+  },
+  "mode": "temporary",
+  "sourceFile": null
+}

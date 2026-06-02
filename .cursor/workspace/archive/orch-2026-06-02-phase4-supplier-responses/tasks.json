@@ -1,0 +1,75 @@
+{
+  "RSP-001": {
+    "id": "RSP-001",
+    "name": "Migration 012 — response schema",
+    "status": "completed",
+    "priority": "critical",
+    "complexity": "moderate",
+    "dependencies": []
+  },
+  "RSP-002": {
+    "id": "RSP-002",
+    "name": "Migration 013 — response RLS",
+    "status": "completed",
+    "priority": "critical",
+    "complexity": "complex",
+    "dependencies": ["RSP-001"]
+  },
+  "RSP-003": {
+    "id": "RSP-003",
+    "name": "price-compare module + tests",
+    "status": "completed",
+    "priority": "high",
+    "complexity": "simple",
+    "dependencies": []
+  },
+  "RSP-004": {
+    "id": "RSP-004",
+    "name": "submitResponseVersion action",
+    "status": "completed",
+    "priority": "critical",
+    "complexity": "complex",
+    "dependencies": ["RSP-001", "RSP-002"]
+  },
+  "RSP-005": {
+    "id": "RSP-005",
+    "name": "Supplier inbox list UI",
+    "status": "pending",
+    "priority": "high",
+    "complexity": "moderate",
+    "dependencies": ["RSP-002"]
+  },
+  "RSP-006": {
+    "id": "RSP-006",
+    "name": "Supplier response form",
+    "status": "pending",
+    "priority": "critical",
+    "complexity": "complex",
+    "dependencies": ["RSP-004", "RSP-005"]
+  },
+  "RSP-007": {
+    "id": "RSP-007",
+    "name": "Version history UI",
+    "status": "pending",
+    "priority": "medium",
+    "complexity": "moderate",
+    "dependencies": ["RSP-006"]
+  },
+  "RSP-008": {
+    "id": "RSP-008",
+    "name": "Procurement comparison table",
+    "status": "pending",
+    "priority": "high",
+    "complexity": "complex",
+    "dependencies": ["RSP-003", "RSP-004", "RSP-007"]
+  },
+  "RSP-009": {
+    "id": "RSP-009",
+    "name": "Invite status on request card",
+    "status": "pending",
+    "priority": "low",
+    "complexity": "simple",
+    "dependencies": ["RSP-008"],
+    "note": "Merged into RSP-008; verify answered badge after revalidate"
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "KBN-001": {
+    "id": "KBN-001",
+    "name": "Kanban config and filter presets",
+    "status": "completed",
+    "priority": "critical",
+    "complexity": "moderate",
+    "dependencies": []
+  },
+  "KBN-002": {
+    "id": "KBN-002",
+    "name": "Server action updateRequestStatus",
+    "status": "completed",
+    "priority": "critical",
+    "complexity": "complex",
+    "dependencies": ["KBN-001"]
+  },
+  "KBN-003": {
+    "id": "KBN-003",
+    "name": "Component request-filters.tsx",
+    "status": "completed",
+    "priority": "high",
+    "complexity": "moderate",
+    "dependencies": ["KBN-001"]
+  },
+  "KBN-004": {
+    "id": "KBN-004",
+    "name": "Shared kanban components and DnD",
+    "status": "completed",
+    "priority": "high",
+    "complexity": "complex",
+    "dependencies": ["KBN-001", "KBN-002"]
+  },
+  "KBN-005": {
+    "id": "KBN-005",
+    "name": "Requests kanban and list/kanban toggle",
+    "status": "completed",
+    "priority": "high",
+    "complexity": "complex",
+    "dependencies": ["KBN-003", "KBN-004"]
+  },
+  "KBN-006": {
+    "id": "KBN-006",
+    "name": "Tasks kanban on /app",
+    "status": "completed",
+    "priority": "medium",
+    "complexity": "moderate",
+    "dependencies": ["KBN-004"]
+  },
+  "KBN-007": {
+    "id": "KBN-007",
+    "name": "Supplier kanban on /supplier",
+    "status": "completed",
+    "priority": "high",
+    "complexity": "moderate",
+    "dependencies": ["KBN-004"]
+  },
+  "KBN-008": {
+    "id": "KBN-008",
+    "name": "Request table /app/table",
+    "status": "completed",
+    "priority": "high",
+    "complexity": "moderate",
+    "dependencies": ["KBN-003", "KBN-005"]
+  },
+  "KBN-009": {
+    "id": "KBN-009",
+    "name": "Tests for kanban config and transitions",
+    "status": "pending",
+    "priority": "medium",
+    "complexity": "simple",
+    "dependencies": ["KBN-001", "KBN-002"]
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "EVT-001": {
+    "id": "EVT-001",
+    "name": "Migration 014 — request_events schema",
+    "status": "completed",
+    "dependencies": []
+  },
+  "EVT-002": {
+    "id": "EVT-002",
+    "name": "Migration 015 — request_events RLS",
+    "status": "completed",
+    "dependencies": ["EVT-001"]
+  },
+  "EVT-003": {
+    "id": "EVT-003",
+    "name": "Actions — postRequestMessage, postQuickSignal",
+    "status": "completed",
+    "dependencies": ["EVT-002"]
+  },
+  "EVT-004": {
+    "id": "EVT-004",
+    "name": "Actions — clarification + timer pause",
+    "status": "completed",
+    "dependencies": ["EVT-002"]
+  },
+  "EVT-005": {
+    "id": "EVT-005",
+    "name": "submitResponseVersion — response_submitted event",
+    "status": "completed",
+    "dependencies": ["EVT-002"]
+  },
+  "EVT-006": {
+    "id": "EVT-006",
+    "name": "Lib + RequestThread component",
+    "status": "completed",
+    "dependencies": ["EVT-003"]
+  },
+  "EVT-007": {
+    "id": "EVT-007",
+    "name": "Procurement UI — thread per invite",
+    "status": "completed",
+    "dependencies": ["EVT-006"]
+  },
+  "EVT-008": {
+    "id": "EVT-008",
+    "name": "Supplier UI — thread on response page",
+    "status": "completed",
+    "dependencies": ["EVT-006"]
+  },
+  "EVT-009": {
+    "id": "EVT-009",
+    "name": "Quick signals UI (procurement)",
+    "status": "completed",
+    "dependencies": ["EVT-003", "EVT-007"]
+  },
+  "EVT-010": {
+    "id": "EVT-010",
+    "name": "Clarification UI + pause indicator",
+    "status": "completed",
+    "dependencies": ["EVT-004", "EVT-007"]
+  }
+}
