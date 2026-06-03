@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate": "node scripts/apply-migration.mjs",
+    "db:seed-test-users": "node scripts/seed-test-users.mjs",
     "cron:expire-invites": "node --import tsx scripts/expire-invites.mjs"
   },
   "dependencies": {
