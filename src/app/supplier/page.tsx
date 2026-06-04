@@ -1,7 +1,8 @@
 import { SupplierView } from "@/components/supplier/supplier-view";
 import type { SupplierRequestListItem } from "@/components/supplier/supplier-request-list";
+import { getUser } from "@/lib/auth";
+import { loadSupplierInviteRows } from "@/lib/db/queries/supplier-invites";
 import { describeDeadline } from "@/lib/request-status";
-import { createClient } from "@/lib/supabase/server";
 
 interface RequestTaskJoin {
   bitrix_task_number: number | null;
@@ -53,16 +54,10 @@ function mapRowToItem(row: InviteRow, now: Date): SupplierRequestListItem | null
  * Supplier home (`/supplier`): kanban (default) or list of invites (RLS-scoped).
  */
 export default async function SupplierRequestsPage() {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("request_suppliers")
-    .select(
-      "id, status, sent_at, deadline_at, requests!request_suppliers_request_id_fkey(request_code, status, sent_at, tasks(bitrix_task_number, title, deal_title))",
-    )
-    .not("sent_at", "is", null)
-    .order("deadline_at", { ascending: true, nullsFirst: false });
+  const user = await getUser();
+  if (!user) return null;
 
-  const rows = ((data as InviteRow[] | null) ?? []).filter(isSentInvite);
+  const rows = (await loadSupplierInviteRows(user.id)).filter(isSentInvite);
   const now = new Date();
 
   const items: SupplierRequestListItem[] = [];

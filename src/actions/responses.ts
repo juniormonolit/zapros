@@ -15,8 +15,11 @@ import {
 import {
   REQUEST_EVENT_RESPONSE_SUBMITTED,
 } from "@/lib/request-events-types";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { loadInviteContext as loadInviteContextQuery } from "@/lib/db/queries/invite-context";
+import { ensureRow, ensureRows } from "@/lib/db/types";
+import { getUser } from "@/lib/auth";
+import { createAdminClient } from "@/lib/admin-client";
+import { createClient } from "@/lib/app-client";
 
 /** Invite statuses that still allow submitting a new response version. */
 const ACTIVE_INVITE_STATUSES = new Set([
@@ -277,75 +280,36 @@ export async function submitResponseVersion(
 }
 
 /** Minimal client surface used by helpers, derived from `createClient`. */
-type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+type AppDbClient = Awaited<ReturnType<typeof createClient>>;
 
-type SupabaseAdminClient = ReturnType<typeof createAdminClient>;
+type AdminDbClient = ReturnType<typeof createAdminClient>;
 
 async function loadInviteContext(
-  supabase: SupabaseServerClient,
+  _supabase: AppDbClient,
   requestSupplierId: string,
 ): Promise<{ invite: InviteContext; request: RequestContext } | null> {
-  const { data, error } = await supabase
-    .from("request_suppliers")
-    .select(
-      `
-      id,
-      supplier_id,
-      status,
-      first_response_at,
-      deadline_at,
-      timer_paused_at,
-      request_id,
-      requests!request_suppliers_request_id_fkey (
-        id,
-        status,
-        payment_form,
-        needs_delivery,
-        sent_at
-      )
-    `,
-    )
-    .eq("id", requestSupplierId)
-    .maybeSingle();
+  const user = await getUser();
+  if (!user) return null;
 
-  if (error || !data) return null;
-
-  const requestRow = data.requests as
-    | {
-        id: string;
-        status: string;
-        payment_form: PaymentForm | null;
-        needs_delivery: boolean;
-        sent_at: string | null;
-      }
-    | {
-        id: string;
-        status: string;
-        payment_form: PaymentForm | null;
-        needs_delivery: boolean;
-        sent_at: string | null;
-      }[]
-    | null;
-
-  const request = Array.isArray(requestRow) ? requestRow[0] : requestRow;
-  if (!request) return null;
+  const loaded = await loadInviteContextQuery(user.id, requestSupplierId);
+  if (!loaded) return null;
 
   return {
     invite: {
-      id: data.id as string,
-      supplierId: data.supplier_id as string,
-      status: data.status as string,
-      firstResponseAt: (data.first_response_at as string | null) ?? null,
-      deadlineAt: (data.deadline_at as string | null) ?? null,
-      timerPausedAt: (data.timer_paused_at as string | null) ?? null,
-      requestId: data.request_id as string,
+      id: loaded.invite.id,
+      supplierId: loaded.invite.supplierId,
+      status: loaded.invite.status,
+      firstResponseAt: loaded.invite.firstResponseAt,
+      deadlineAt: loaded.invite.deadlineAt,
+      timerPausedAt: loaded.invite.timerPausedAt,
+      requestId: loaded.invite.requestId,
     },
     request: {
-      id: request.id,
-      status: request.status,
-      paymentForm: request.payment_form,
-      needsDelivery: Boolean(request.needs_delivery),
-      sentAt: request.sent_at,
+      id: loaded.request.id,
+      status: loaded.request.status,
+      paymentForm: loaded.request.paymentForm,
+      needsDelivery: loaded.request.needsDelivery,
+      sentAt: loaded.request.sentAt,
     },
   };
 }
@@ -368,7 +332,7 @@ function validateInvite(invite: InviteContext): string | null {
 }
 
 async function loadRequestItemIds(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   requestId: string,
 ): Promise<Set<string> | null> {
   const { data, error } = await supabase
@@ -376,7 +340,7 @@ async function loadRequestItemIds(
     .select("id")
     .eq("request_id", requestId);
   if (error) return null;
-  return new Set((data ?? []).map((row) => row.id as string));
+  return new Set(ensureRows(data).map((row) => String(row.id)));
 }
 
 function normalizeComment(comment: string | null | undefined): string | null {
@@ -534,7 +498,7 @@ function isPositiveInteger(value: unknown): boolean {
 }
 
 async function nextVersionNumber(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   requestSupplierId: string,
 ): Promise<number | null> {
   const { data, error } = await supabase
@@ -546,12 +510,13 @@ async function nextVersionNumber(
     .maybeSingle();
 
   if (error) return null;
-  const current = data?.version_number;
+  const row = ensureRow(data);
+  const current = row?.version_number;
   return typeof current === "number" ? current + 1 : 1;
 }
 
 async function isFirstResponseForRequest(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   requestId: string,
 ): Promise<boolean | null> {
   const { data: invites, error: invitesError } = await supabase
@@ -560,7 +525,7 @@ async function isFirstResponseForRequest(
     .eq("request_id", requestId);
   if (invitesError) return null;
 
-  const inviteIds = (invites ?? []).map((row) => row.id as string);
+  const inviteIds = ensureRows(invites).map((row) => String(row.id));
   if (inviteIds.length === 0) return true;
 
   const { count, error } = await supabase
@@ -573,7 +538,7 @@ async function isFirstResponseForRequest(
 }
 
 async function clearCurrentVersions(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   requestSupplierId: string,
 ): Promise<boolean> {
   const { error } = await supabase
@@ -585,7 +550,7 @@ async function clearCurrentVersions(
 }
 
 async function insertVersion(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   params: {
     requestSupplierId: string;
     versionNumber: number;
@@ -613,12 +578,13 @@ async function insertVersion(
     .eq("version_number", params.versionNumber)
     .maybeSingle();
 
-  if (selectError || !data) return null;
-  return data.id as string;
+  const row = ensureRow(data);
+  if (selectError || !row) return null;
+  return String(row.id);
 }
 
 async function insertLineItems(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   versionId: string,
   lines: NormalizedLine[],
 ): Promise<boolean> {
@@ -640,7 +606,7 @@ async function insertLineItems(
 }
 
 async function markInviteAnswered(
-  admin: SupabaseAdminClient,
+  admin: AdminDbClient,
   requestSupplierId: string,
   existingFirstResponseAt: string | null,
   clearTimerPause: boolean,
@@ -682,7 +648,7 @@ async function markInviteAnswered(
 }
 
 async function markRequestHasResponse(
-  admin: SupabaseAdminClient,
+  admin: AdminDbClient,
   requestId: string,
 ): Promise<boolean> {
   const { error } = await admin

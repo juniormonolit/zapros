@@ -1,136 +1,55 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import {
-  homeRouteForRole,
-  PROFILE_COLUMNS,
-  type UserRole,
-} from "@/lib/auth";
-import { updateSession } from "@/lib/supabase/middleware";
-
-/**
- * Protected route segments and the role each one requires. A path belongs to a
- * segment when it equals the segment or is nested beneath it.
- */
-const SEGMENT_ROLE: Record<string, UserRole> = {
-  "/admin": "admin",
-  "/app": "procurement",
-  "/supplier": "supplier",
-  "/sourcing": "senior_procurement",
-};
+import { getSessionFromRequest } from "@/lib/auth/session-edge";
 
 const LOGIN_ROUTE = "/login";
+const AUTH_REDIRECT_ROUTE = "/auth/redirect";
 
-/**
- * Returns the protected segment a pathname belongs to, or `null` when the path
- * is not under any protected segment.
- */
-function matchedSegment(pathname: string): string | null {
-  return (
-    Object.keys(SEGMENT_ROLE).find(
-      (segment) =>
-        pathname === segment || pathname.startsWith(`${segment}/`),
-    ) ?? null
+function matchedProtected(pathname: string): boolean {
+  return ["/admin", "/app", "/supplier", "/sourcing"].some(
+    (segment) => pathname === segment || pathname.startsWith(`${segment}/`),
   );
 }
 
-/**
- * Builds a redirect to `pathname`, copying the (possibly refreshed) auth
- * cookies from `response` so the session is not lost across the redirect.
- */
-function redirectTo(
-  request: NextRequest,
-  pathname: string,
-  response: NextResponse,
-): NextResponse {
+function redirectTo(request: NextRequest, pathname: string): NextResponse {
   const url = request.nextUrl.clone();
   url.pathname = pathname;
   url.search = "";
-
-  const redirect = NextResponse.redirect(url);
-  for (const cookie of response.cookies.getAll()) {
-    redirect.cookies.set(cookie);
-  }
-
-  return redirect;
+  return NextResponse.redirect(url);
 }
 
 /**
- * Redirects to the login page while clearing the Supabase auth cookies, so a
- * deactivated or profile-less user cannot keep a usable session.
- */
-function redirectToLoginAndClear(
-  request: NextRequest,
-  response: NextResponse,
-): NextResponse {
-  const redirect = redirectTo(request, LOGIN_ROUTE, response);
-  for (const cookie of request.cookies.getAll()) {
-    if (cookie.name.startsWith("sb-")) {
-      redirect.cookies.delete(cookie.name);
-    }
-  }
-
-  return redirect;
-}
-
-/**
- * Edge middleware: refreshes the auth session, gates protected routes, and
- * enforces per-segment role access.
- *
- * Routing rules:
- * - Unauthenticated users hitting `/` or a protected segment → `/login`.
- * - Authenticated users on `/login` or `/` → their role's home route.
- * - Authenticated users on a segment they don't own → their own home route.
- * - Deactivated / profile-less users → logged out and sent to `/login`.
- *
- * The profile role is read with the request-bound client from `updateSession`
- * (the server `cookies()` API is unavailable here).
+ * Edge middleware: session cookie check + coarse auth gate.
+ * Role checks run in Node layouts (`getProfile`) and `/auth/redirect`.
  */
 export async function middleware(request: NextRequest): Promise<NextResponse> {
-  const { supabase, user, response } = await updateSession(request);
+  const session = await getSessionFromRequest(request);
   const { pathname } = request.nextUrl;
 
-  const segment = matchedSegment(pathname);
-  const isProtected = segment !== null;
+  const isProtected = matchedProtected(pathname);
   const isLogin = pathname === LOGIN_ROUTE;
   const isRoot = pathname === "/";
 
-  if (!user) {
+  if (!session) {
     if (isProtected || isRoot) {
-      return redirectTo(request, LOGIN_ROUTE, response);
+      return redirectTo(request, LOGIN_ROUTE);
     }
-
-    return response;
+    return NextResponse.next();
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select(PROFILE_COLUMNS)
-    .eq("id", user.id)
-    .single();
-
-  if (!profile || !profile.is_active) {
-    return redirectToLoginAndClear(request, response);
+  if (pathname === AUTH_REDIRECT_ROUTE) {
+    return NextResponse.next();
   }
-
-  const home = homeRouteForRole(profile.role as UserRole);
 
   if (isLogin || isRoot) {
-    return redirectTo(request, home, response);
+    return redirectTo(request, AUTH_REDIRECT_ROUTE);
   }
 
-  if (segment && SEGMENT_ROLE[segment] !== profile.role) {
-    return redirectTo(request, home, response);
-  }
-
-  return response;
+  return NextResponse.next();
 }
 
 export const config = {
   matcher: [
-    /*
-     * Run on all routes except Next.js internals and static asset files, so we
-     * never refresh the session for `_next/*`, the favicon, or image files.
-     */
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

@@ -1,0 +1,7 @@
+-- NOT REQUIRED for zapros on Yandex Managed PostgreSQL.
+--
+-- Yandex does not allow CREATE ROLE for users like zapros_migrate or junior.
+-- Migrations use "to public" instead of "to authenticated" when DATABASE_URL
+-- points to *.yandexcloud.net (see scripts/apply-migration.mjs).
+--
+-- Keep this file as documentation only. Do not run in Web SQL.

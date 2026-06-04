@@ -8,8 +8,9 @@ import {
 import { buttonVariants } from "@/components/ui/button";
 import { getProfile } from "@/lib/auth";
 import type { PaymentForm } from "@/lib/parser/bitrix";
+import { ensureRow, ensureRows } from "@/lib/db/types";
 import { loadAvailableSuppliers } from "@/lib/suppliers-available";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/app-client";
 
 export const metadata = {
   title: "Создать запрос",
@@ -60,12 +61,13 @@ export default async function NewRequestPage({
 
   const supabase = await createClient();
 
-  const { data: task } = await supabase
+  const { data: taskData } = await supabase
     .from("tasks")
     .select("id, title, deal_title, payment_form")
     .eq("id", id)
-    .maybeSingle<TaskRecord>();
+    .maybeSingle();
 
+  const task = ensureRow(taskData) as unknown as TaskRecord | null;
   if (!task) {
     notFound();
   }
@@ -76,7 +78,7 @@ export default async function NewRequestPage({
     .eq("task_id", id)
     .order("sort_order", { ascending: true });
 
-  const items = (itemsData as RequestItemOption[] | null) ?? [];
+  const items = ensureRows(itemsData) as unknown as RequestItemOption[];
   const { suppliers, groups, ungroupedSupplierIds } =
     await loadAvailableSuppliers();
 

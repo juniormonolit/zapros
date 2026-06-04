@@ -13,8 +13,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { PaymentForm } from "@/lib/parser/bitrix";
+import { ensureRow, ensureRows } from "@/lib/db/types";
 import { fetchRequestCountsForTask } from "@/lib/request-counters";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/app-client";
 
 /** Shape of a `tasks` row loaded for the detail card (RLS-scoped). */
 interface TaskRecord {
@@ -102,14 +103,15 @@ export default async function TaskDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: task } = await supabase
+  const { data: taskData } = await supabase
     .from("tasks")
     .select(
       "id, bitrix_task_number, bitrix_url, title, manager_name, delivery_address, purposes, payment_form, delivery_date, category, deal_title, requested_at, status, created_at",
     )
     .eq("id", id)
-    .maybeSingle<TaskRecord>();
+    .maybeSingle();
 
+  const task = ensureRow(taskData) as unknown as TaskRecord | null;
   if (!task) {
     notFound();
   }
@@ -120,7 +122,7 @@ export default async function TaskDetailPage({
     .eq("task_id", id)
     .order("sort_order", { ascending: true });
 
-  const items = (itemsData as TaskItemRow[] | null) ?? [];
+  const items = ensureRows(itemsData) as unknown as TaskItemRow[];
 
   // Real request counter (REQ-008): RLS-scoped, drafts excluded (F002).
   const requestCounts = await fetchRequestCountsForTask(supabase, task.id);

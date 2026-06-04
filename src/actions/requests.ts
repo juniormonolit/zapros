@@ -8,6 +8,7 @@ import type {
   UpdateRequestStatusResult,
 } from "@/actions/request-status-types";
 import { getProfile } from "@/lib/auth";
+import { ensureRow, ensureRows } from "@/lib/db/types";
 import { computeDeadline, parseDeadlineDays } from "@/lib/deadline";
 import {
   FORBIDDEN_MANUAL_REQUEST_TARGETS,
@@ -33,8 +34,8 @@ import type {
 import { FINAL_INVITE_STATUSES } from "@/lib/request-finalization-types";
 import { applyInProgressToInvites } from "@/lib/request-status-actions";
 import type { RequestStatus } from "@/lib/request-status";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/admin-client";
+import { createClient } from "@/lib/app-client";
 
 /** Roles allowed to create and send procurement requests (F002 / REQ-004). */
 const REQUEST_AUTHORS = new Set(["procurement", "admin"]);
@@ -154,11 +155,12 @@ export async function createRequestDraft(
 
   // RLS limits this to the owner's task (or any task for admin); a missing row
   // means the task does not exist or the user has no access to it.
-  const { data: task, error: taskError } = await supabase
+  const { data: taskData, error: taskError } = await supabase
     .from("tasks")
     .select("id, payment_form")
     .eq("id", taskId)
     .maybeSingle();
+  const task = ensureRow(taskData);
   if (taskError || !task) {
     return fail("Задача не найдена или нет доступа.");
   }
@@ -171,7 +173,7 @@ export async function createRequestDraft(
     return fail("Некоторые выбранные позиции не принадлежат этой задаче.");
   }
 
-  const { data: inserted, error: insertError } = await supabase
+  const { data: insertedData, error: insertError } = await supabase
     .from("requests")
     .insert({
       task_id: taskId,
@@ -181,11 +183,12 @@ export async function createRequestDraft(
     })
     .select("id, request_code")
     .single();
+  const inserted = ensureRow(insertedData);
   if (insertError || !inserted) {
     return fail("Не удалось создать запрос.");
   }
 
-  const requestId = inserted.id as string;
+  const requestId = String(inserted.id);
 
   const itemsError = await insertRequestItems(supabase, requestId, items);
   if (itemsError) {
@@ -198,7 +201,7 @@ export async function createRequestDraft(
   return {
     ok: true,
     requestId,
-    requestCode: inserted.request_code as string,
+    requestCode: String(inserted.request_code),
   };
 }
 
@@ -234,11 +237,12 @@ export async function sendRequest(
   const supabase = await createClient();
 
   // RLS limits this to the owner's request (or any for admin).
-  const { data: request, error: requestError } = await supabase
+  const { data: requestData, error: requestError } = await supabase
     .from("requests")
     .select("id, status, task_id")
     .eq("id", requestId)
     .maybeSingle();
+  const request = ensureRow(requestData);
   if (requestError || !request) {
     return fail("Запрос не найден или нет доступа.");
   }
@@ -246,14 +250,15 @@ export async function sendRequest(
     return fail("Запрос уже отправлен.");
   }
 
-  const { data: itemRows, error: itemsError } = await supabase
+  const { data: itemRowsData, error: itemsError } = await supabase
     .from("request_items")
     .select("task_item_id")
     .eq("request_id", requestId);
   if (itemsError) {
     return fail("Не удалось загрузить позиции запроса.");
   }
-  if (!itemRows || itemRows.length === 0) {
+  const itemRows = ensureRows(itemRowsData);
+  if (itemRows.length === 0) {
     return fail("Нельзя отправить запрос без позиций.");
   }
 
@@ -314,7 +319,10 @@ export async function sendRequest(
 
   // Best-effort, monotonic: once the request is sent, its items genuinely are
   // "in a request", so a failure here is logged but does not undo the send.
-  await markItemsInRequest(supabase, itemRows);
+  await markItemsInRequest(
+    supabase,
+    itemRows as unknown as readonly { task_item_id: string | null }[],
+  );
 
   revalidatePath(`/app/tasks/${request.task_id}`);
   revalidatePath(`/app/requests/${requestId}`);
@@ -360,11 +368,12 @@ export async function addSupplierToRequest(
   const supabase = await createClient();
 
   // RLS limits this to the owner's request (or any for admin).
-  const { data: request, error: requestError } = await supabase
+  const { data: requestData2, error: requestError } = await supabase
     .from("requests")
     .select("id, status, sent_at")
     .eq("id", requestId)
     .maybeSingle();
+  const request = ensureRow(requestData2);
   if (requestError || !request) {
     return fail("Запрос не найден или нет доступа.");
   }
@@ -472,17 +481,18 @@ export async function updateRequestStatus(
   }
 
   const supabase = await createClient();
-  const { data: request, error: requestError } = await supabase
+  const { data: requestData3, error: requestError } = await supabase
     .from("requests")
     .select("id, status")
     .eq("id", requestId)
     .maybeSingle();
 
+  const request = ensureRow(requestData3);
   if (requestError || !request) {
     return fail("Запрос не найден или нет доступа.");
   }
 
-  const currentStatus = request.status as string;
+  const currentStatus = String(request.status);
   if (BLOCKED_REQUEST_STATUSES.has(currentStatus)) {
     return fail("Статус черновика или отменённого запроса нельзя изменить.");
   }
@@ -505,7 +515,7 @@ export async function updateRequestStatus(
     return fail("Не удалось обновить статус запроса.");
   }
 
-  const { data: anchorInvite } = await supabase
+  const { data: anchorInviteData } = await supabase
     .from("request_suppliers")
     .select("id")
     .eq("request_id", requestId)
@@ -513,9 +523,10 @@ export async function updateRequestStatus(
     .limit(1)
     .maybeSingle();
 
+  const anchorInvite = ensureRow(anchorInviteData);
   if (anchorInvite?.id) {
     const requestEventErr = await insertStatusChangeEvent(supabase, {
-      requestSupplierId: anchorInvite.id as string,
+      requestSupplierId: String(anchorInvite.id),
       authorId: profile.id,
       entity: "request",
       oldStatus: currentStatus,
@@ -765,15 +776,16 @@ interface FinalizationContext {
 }
 
 async function loadFinalizationContext(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   requestId: string,
 ): Promise<FinalizationContext | null> {
-  const { data: request, error: requestError } = await supabase
+  const { data: requestData, error: requestError } = await supabase
     .from("requests")
     .select("id, status, task_id")
     .eq("id", requestId)
     .maybeSingle();
 
+  const request = ensureRow(requestData);
   if (requestError || !request) return null;
 
   const { data: invites, error: invitesError } = await supabase
@@ -791,20 +803,20 @@ async function loadFinalizationContext(
 
   if (itemsError) return null;
 
-  const taskItemIds = (items ?? [])
+  const taskItemIds = ensureRows(items)
     .map((row) => row.task_item_id as string | null)
     .filter((id): id is string => typeof id === "string" && id.length > 0);
 
   return {
     request: {
-      id: request.id as string,
-      status: request.status as string,
-      taskId: request.task_id as string,
+      id: String(request.id),
+      status: String(request.status),
+      taskId: String(request.task_id),
     },
-    invites: (invites ?? []).map((row) => ({
-      id: row.id as string,
-      supplierId: row.supplier_id as string,
-      status: row.status as string,
+    invites: ensureRows(invites).map((row) => ({
+      id: String(row.id),
+      supplierId: String(row.supplier_id),
+      status: String(row.status),
       firstResponseAt: (row.first_response_at as string | null) ?? null,
     })),
     taskItemIds,
@@ -840,7 +852,7 @@ function noNewSuppliersMessage(hasAlreadyInvited: boolean): string {
 }
 
 /** Minimal client surface used by the helpers, derived from `createClient`. */
-type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+type AppDbClient = Awaited<ReturnType<typeof createClient>>;
 
 /**
  * Load the snapshot fields of the given task items, scoped to one task. Returns
@@ -848,7 +860,7 @@ type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
  * do not belong to the task" (an empty/short array).
  */
 async function loadTaskItemSnapshots(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   taskId: string,
   itemIds: string[],
 ): Promise<TaskItemSnapshot[] | null> {
@@ -858,7 +870,7 @@ async function loadTaskItemSnapshots(
     .eq("task_id", taskId)
     .in("id", itemIds);
   if (error) return null;
-  return (data ?? []) as TaskItemSnapshot[];
+  return ensureRows(data) as unknown as TaskItemSnapshot[];
 }
 
 /**
@@ -867,7 +879,7 @@ async function loadTaskItemSnapshots(
  * error.
  */
 async function insertRequestItems(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   requestId: string,
   items: readonly TaskItemSnapshot[],
 ): Promise<boolean> {
@@ -891,7 +903,7 @@ async function insertRequestItems(
  * `works_in_zapros` rule.
  */
 async function loadInSystemSupplierIds(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   selectedIds: string[],
 ): Promise<string[] | null> {
   const { data, error } = await supabase
@@ -901,7 +913,7 @@ async function loadInSystemSupplierIds(
     .eq("works_in_zapros", true)
     .eq("is_active", true);
   if (error) return null;
-  return (data ?? []).map((row) => row.id as string);
+  return ensureRows(data).map((row) => String(row.id));
 }
 
 /**
@@ -910,7 +922,7 @@ async function loadInSystemSupplierIds(
  * on a query error so the caller can distinguish "DB failed" from "none exist".
  */
 async function loadExistingInviteSupplierIds(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   requestId: string,
   supplierIds: string[],
 ): Promise<Set<string> | null> {
@@ -920,7 +932,7 @@ async function loadExistingInviteSupplierIds(
     .eq("request_id", requestId)
     .in("supplier_id", supplierIds);
   if (error) return null;
-  return new Set((data ?? []).map((row) => row.supplier_id as string));
+  return new Set(ensureRows(data).map((row) => String(row.supplier_id)));
 }
 
 /**
@@ -929,7 +941,7 @@ async function loadExistingInviteSupplierIds(
  * unreadable. Always returns a concrete deadline instant.
  */
 async function resolveDeadline(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   sentAt: Date,
 ): Promise<Date> {
   const { data } = await supabase
@@ -938,7 +950,10 @@ async function resolveDeadline(
     .eq("key", DEADLINE_SETTING_KEY)
     .maybeSingle();
 
-  const days = parseDeadlineDays(data?.value ?? null);
+  const setting = ensureRow(data);
+  const days = parseDeadlineDays(
+    setting?.value != null ? String(setting.value) : null,
+  );
   return computeDeadline(sentAt, days);
 }
 
@@ -948,7 +963,7 @@ async function resolveDeadline(
  * keep their draft value). Returns `true` on error.
  */
 async function markRequestSent(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   requestId: string,
   sentAtIso: string,
   options: SendRequestOptions,
@@ -978,7 +993,7 @@ async function markRequestSent(
  * failure is logged but does not fail the (already committed) send.
  */
 async function markItemsInRequest(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   itemRows: readonly { task_item_id: string | null }[],
 ): Promise<void> {
   const taskItemIds = itemRows

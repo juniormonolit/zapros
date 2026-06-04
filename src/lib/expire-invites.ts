@@ -1,4 +1,6 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { DbClient } from "@/lib/db/client";
+import { loadExpireInviteCandidates } from "@/lib/db/queries/expire-invite-candidates";
+import { ensureRow, ensureRows } from "@/lib/db/types";
 
 import { isOverdue } from "@/lib/deadline";
 import {
@@ -122,20 +124,11 @@ export function aggregateRequestAfterExpire(
   return null;
 }
 
-function parseRequestJoin(
-  requests: { created_by: string; status: string } | { created_by: string; status: string }[] | null,
-): { createdBy: string; status: string } | null {
-  if (!requests) return null;
-  const row = Array.isArray(requests) ? requests[0] : requests;
-  if (!row) return null;
-  return { createdBy: row.created_by, status: row.status };
-}
-
 /**
  * Expire overdue invites and archive empty requests (F007 cron).
  */
 export async function runExpireInvites(
-  admin: SupabaseClient,
+  admin: DbClient,
   now: Date,
   options: RunExpireInvitesOptions = {},
 ): Promise<RunExpireInvitesResult> {
@@ -145,48 +138,14 @@ export async function runExpireInvites(
     errors: [],
   };
 
-  const { data, error } = await admin
-    .from("request_suppliers")
-    .select(
-      `
-      id,
-      request_id,
-      status,
-      deadline_at,
-      timer_paused_at,
-      first_response_at,
-      requests!request_suppliers_request_id_fkey ( created_by, status )
-    `,
-    )
-    .lt("deadline_at", now.toISOString())
-    .is("timer_paused_at", null)
-    .in("status", [...EXPIRABLE_INVITE_STATUSES]);
-
-  if (error) {
-    result.errors.push(error.message);
-    return result;
-  }
-
-  const candidates: ExpireInviteCandidate[] = [];
-  for (const row of data ?? []) {
-    const request = parseRequestJoin(
-      row.requests as
-        | { created_by: string; status: string }
-        | { created_by: string; status: string }[]
-        | null,
+  let candidates: ExpireInviteCandidate[];
+  try {
+    candidates = await loadExpireInviteCandidates(now);
+  } catch (err) {
+    result.errors.push(
+      err instanceof Error ? err.message : "Failed to load expire candidates",
     );
-    if (!request) continue;
-
-    candidates.push({
-      id: row.id as string,
-      requestId: row.request_id as string,
-      status: row.status as string,
-      deadlineAt: (row.deadline_at as string | null) ?? null,
-      timerPausedAt: (row.timer_paused_at as string | null) ?? null,
-      firstResponseAt: (row.first_response_at as string | null) ?? null,
-      requestStatus: request.status,
-      requestCreatedBy: request.createdBy,
-    });
+    return result;
   }
 
   const toExpire = candidates.filter((invite) =>
@@ -241,35 +200,39 @@ export async function runExpireInvites(
 }
 
 async function syncRequestAfterInviteExpire(
-  admin: SupabaseClient,
+  admin: DbClient,
   requestId: string,
   now: Date,
   options: RunExpireInvitesOptions,
 ): Promise<boolean> {
-  const { data: requestRow, error: requestErr } = await admin
+  const { data: requestData, error: requestErr } = await admin
     .from("requests")
     .select("id, status, created_by")
     .eq("id", requestId)
     .maybeSingle();
 
+  const requestRow = ensureRow(requestData);
   if (requestErr || !requestRow) return false;
 
-  const currentStatus = requestRow.status as string;
+  const currentStatus = String(requestRow.status);
   if (FINAL_REQUEST_STATUSES.has(currentStatus)) {
     return false;
   }
 
-  const { data: inviteRows, error: invitesErr } = await admin
+  const { data: inviteRowsData, error: invitesErr } = await admin
     .from("request_suppliers")
     .select("id, status, first_response_at")
     .eq("request_id", requestId)
     .order("created_at", { ascending: true });
 
-  if (invitesErr || !inviteRows) return false;
+  if (invitesErr) return false;
 
-  const statuses = inviteRows.map((row) => row.status as string);
+  const inviteRows = ensureRows(inviteRowsData);
+  if (inviteRows.length === 0) return false;
+
+  const statuses = inviteRows.map((row) => String(row.status));
   const hasAnyResponse = inviteRows.some(
-    (row) => (row.first_response_at as string | null) != null,
+    (row) => row.first_response_at != null,
   );
 
   const nextStatus = aggregateRequestAfterExpire(statuses, hasAnyResponse);
@@ -291,10 +254,10 @@ async function syncRequestAfterInviteExpire(
 
   if (updateErr || !updatedRequest?.length) return false;
 
-  const anchorInviteId = inviteRows[0]?.id as string | undefined;
+  const anchorInviteId = inviteRows[0] ? String(inviteRows[0].id) : undefined;
   if (!anchorInviteId) return true;
 
-  const authorId = options.authorId ?? (requestRow.created_by as string);
+  const authorId = options.authorId ?? String(requestRow.created_by);
   const eventErr = await insertStatusChangeEvent(admin, {
     requestSupplierId: anchorInviteId,
     authorId,

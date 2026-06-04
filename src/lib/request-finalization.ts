@@ -1,4 +1,5 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { DbClient } from "@/lib/db/client";
+import { ensureRows } from "@/lib/db/types";
 
 import {
   insertRequestEvent,
@@ -83,7 +84,7 @@ export function findOpenDuplicateRequestIds(
 
 /** Set `task_items.line_status = closed` for positions in the winning request. */
 export async function closeRequestLineItems(
-  admin: SupabaseClient,
+  admin: DbClient,
   taskItemIds: readonly string[],
 ): Promise<string | null> {
   if (taskItemIds.length === 0) return null;
@@ -101,7 +102,7 @@ export async function closeRequestLineItems(
 
 /** Set `task_items.line_status = rejected` for positions in a rejected request. */
 export async function rejectTaskItemsForLoss(
-  admin: SupabaseClient,
+  admin: DbClient,
   taskItemIds: readonly string[],
 ): Promise<string | null> {
   if (taskItemIds.length === 0) return null;
@@ -118,8 +119,8 @@ export async function rejectTaskItemsForLoss(
 }
 
 export interface CancelDuplicateOpenRequestsParams {
-  admin: SupabaseClient;
-  eventsClient: SupabaseClient;
+  admin: DbClient;
+  eventsClient: DbClient;
   winningRequestId: string;
   taskId: string;
   taskItemIds: readonly string[];
@@ -149,8 +150,8 @@ export async function cancelDuplicateOpenRequests(
 
   const relatedRequestIds = [
     ...new Set(
-      (itemRows ?? [])
-        .map((row) => row.request_id as string)
+      ensureRows(itemRows)
+        .map((row) => String(row.request_id))
         .filter((id) => id !== winningRequestId),
     ),
   ];
@@ -167,9 +168,9 @@ export async function cancelDuplicateOpenRequests(
     return "Не удалось найти дублирующие запросы.";
   }
 
-  const candidateRows = (requestRows ?? []).map((row) => ({
-    requestId: row.id as string,
-    status: row.status as string,
+  const candidateRows = ensureRows(requestRows).map((row) => ({
+    requestId: String(row.id),
+    status: String(row.status),
   }));
 
   const duplicateIds = findOpenDuplicateRequestIds(winningRequestId, candidateRows);
@@ -202,10 +203,10 @@ export async function cancelDuplicateOpenRequests(
       return "Не удалось обновить приглашения дублирующего запроса.";
     }
 
-    const inviteRows = invites ?? [];
+    const inviteRows = ensureRows(invites);
     const activeInviteIds = inviteRows
-      .filter((row) => !FINAL_INVITE_STATUSES.has(row.status as string))
-      .map((row) => row.id as string);
+      .filter((row) => !FINAL_INVITE_STATUSES.has(String(row.status)))
+      .map((row) => String(row.id));
 
     if (activeInviteIds.length > 0) {
       const { error: inviteUpdateErr } = await admin
@@ -218,7 +219,7 @@ export async function cancelDuplicateOpenRequests(
       }
     }
 
-    const anchorInviteId = inviteRows[0]?.id as string | undefined;
+    const anchorInviteId = inviteRows[0] ? String(inviteRows[0].id) : undefined;
     const oldRequestStatus =
       candidateRows.find((r) => r.requestId === duplicateId)?.status ?? "unknown";
 
@@ -234,10 +235,10 @@ export async function cancelDuplicateOpenRequests(
       }
 
       for (const invite of inviteRows) {
-        const oldStatus = invite.status as string;
+        const oldStatus = String(invite.status);
         if (FINAL_INVITE_STATUSES.has(oldStatus) || oldStatus === "lost") continue;
         const inviteEventErr = await insertStatusChangeEvent(eventsClient, {
-          requestSupplierId: invite.id as string,
+          requestSupplierId: String(invite.id),
           authorId,
           entity: "invite",
           oldStatus,
@@ -260,7 +261,7 @@ export interface FinalizationEventInviteChange {
 }
 
 export interface InsertFinalizationEventsParams {
-  eventsClient: SupabaseClient;
+  eventsClient: DbClient;
   authorId: string;
   anchorInviteId: string;
   requestOldStatus: string;
@@ -312,7 +313,7 @@ export async function insertFinalizationEvents(
 }
 
 async function insertDuplicateCancelEvent(
-  supabase: SupabaseClient,
+  supabase: DbClient,
   params: {
     requestSupplierId: string;
     authorId: string;

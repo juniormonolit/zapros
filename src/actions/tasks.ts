@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 
 import { getProfile, type Profile } from "@/lib/auth";
 import type { ParsedTaskPreview } from "@/lib/parser/bitrix";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { ensureRow, ensureRows } from "@/lib/db/types";
+import { createAdminClient } from "@/lib/admin-client";
+import { createClient } from "@/lib/app-client";
 
 /** Postgres unique-violation error code, surfaced via PostgREST. */
 const UNIQUE_VIOLATION = "23505";
@@ -147,10 +148,10 @@ export async function createTask(
   const bitrixUrl = buildBitrixUrl(
     parsed.category,
     bitrixTaskNumber,
-    (settings ?? []) as BitrixUrlSetting[],
+    ensureRows(settings) as unknown as BitrixUrlSetting[],
   );
 
-  const { data: inserted, error: insertError } = await supabase
+  const { data: insertedData, error: insertError } = await supabase
     .from("tasks")
     .insert({
       created_by: profile.id,
@@ -170,6 +171,7 @@ export async function createTask(
     .select("id")
     .single();
 
+  const inserted = ensureRow(insertedData);
   if (insertError || !inserted) {
     if (insertError?.code === UNIQUE_VIOLATION) {
       const duplicate = await findTaskByNumberPrivileged(bitrixTaskNumber);
@@ -178,7 +180,7 @@ export async function createTask(
     return fail("Не удалось создать задачу.");
   }
 
-  const taskId = inserted.id as string;
+  const taskId = String(inserted.id);
 
   const itemsError = await insertTaskItems(supabase, taskId, parsed);
   if (itemsError) {
@@ -207,7 +209,7 @@ export async function createTask(
 }
 
 /** Minimal client surface used by the helpers, derived from `createClient`. */
-type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+type AppDbClient = Awaited<ReturnType<typeof createClient>>;
 
 /** An existing task discovered during duplicate detection, with its owner. */
 interface ExistingTask {
@@ -233,8 +235,9 @@ async function findTaskByNumberPrivileged(
     .eq("bitrix_task_number", bitrixTaskNumber)
     .maybeSingle();
 
-  return data
-    ? { id: data.id as string, createdBy: data.created_by as string }
+  const row = ensureRow(data);
+  return row
+    ? { id: String(row.id), createdBy: String(row.created_by) }
     : null;
 }
 
@@ -277,7 +280,7 @@ function duplicateResult(
  * `line_status` falls back to its column default. Returns `true` on error.
  */
 async function insertTaskItems(
-  supabase: SupabaseServerClient,
+  supabase: AppDbClient,
   taskId: string,
   parsed: ParsedTaskPreview,
 ): Promise<boolean> {

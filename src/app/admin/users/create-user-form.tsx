@@ -21,8 +21,7 @@ interface CreateUserFormProps {
 
 /**
  * Admin form for provisioning a new user. The supplier select is required and
- * only shown when role=supplier. Leaving the password empty sends an invite
- * email instead of setting a password.
+ * only shown when role=supplier. Password is required (min. 8 characters).
  */
 export function CreateUserForm({ suppliers }: CreateUserFormProps) {
   const [state, formAction, isPending] = useActionState(
@@ -106,10 +105,12 @@ export function CreateUserForm({ suppliers }: CreateUserFormProps) {
             name="password"
             type="text"
             autoComplete="off"
-            placeholder="Пусто — отправить приглашение"
+            placeholder="Минимум 8 символов"
+            required
+            minLength={8}
           />
           <p className="text-xs text-text-muted">
-            Минимум 8 символов. Оставьте пустым, чтобы отправить invite по email.
+            Пользователь сможет войти с этим паролем сразу после создания.
           </p>
         </div>
       </div>

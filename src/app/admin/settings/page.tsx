@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 
 import { SettingsForm } from "@/components/admin/settings-form";
 import { getProfile } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { ensureRows } from "@/lib/db/types";
+import { createClient } from "@/lib/app-client";
 
 /** Defaults mirrored from migration 002 seeds, used when a key is missing. */
 const DEFAULTS = {
@@ -28,7 +29,7 @@ export default async function AdminSettingsPage() {
     .in("key", ["response_deadline_days", "cash_to_noncash_ratio"]);
 
   const values = new Map(
-    (data ?? []).map((row) => [String(row.key), String(row.value)]),
+    ensureRows(data).map((row) => [String(row.key), String(row.value)]),
   );
 
   return (

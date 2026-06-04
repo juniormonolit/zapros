@@ -1,15 +1,30 @@
+import { redirect } from "next/navigation";
+
 import { PROCUREMENT_NAV } from "@/components/navigation/nav-config";
 import { NavLinks } from "@/components/navigation/nav-links";
 import { Topbar } from "@/components/navigation/topbar";
+import { getProfile, homeRouteForRole } from "@/lib/auth";
 
 /**
- * Procurement shell: shared topbar plus a tab row (Задачи / Запросы /
- * Таблица). Tabs scroll horizontally on narrow screens. Only procurement
- * navigation is rendered here.
+ * Procurement shell with role guard (defence in depth; middleware is auth-only).
  */
-export default function ProcurementLayout({
+export default async function ProcurementLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const profile = await getProfile();
+
+  if (!profile) {
+    redirect("/login");
+  }
+
+  if (!profile.is_active) {
+    redirect("/login");
+  }
+
+  if (profile.role !== "procurement") {
+    redirect(homeRouteForRole(profile.role));
+  }
+
   return (
     <div className="flex min-h-svh flex-col bg-bg-primary">
       <Topbar />

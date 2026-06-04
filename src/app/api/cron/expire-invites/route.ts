@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { runExpireInvites } from "@/lib/expire-invites";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createAdminClient } from "@/lib/admin-client";
 
 function isAuthorized(request: Request): boolean {
   const cronSecret = process.env.CRON_SECRET;

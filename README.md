@@ -8,59 +8,74 @@
 
 - **Next.js 15** (App Router) + **React 19** + **TypeScript**
 - **Tailwind CSS v4** + **shadcn/ui** (base color: neutral)
-- **Supabase** (PostgreSQL, Auth, RLS) через `@supabase/ssr` и `@supabase/supabase-js`
+- **PostgreSQL** (Yandex Managed PostgreSQL): данные, RLS, собственная аутентификация (JWT + bcrypt)
 
 ## Требования
 
 - Node.js 20+ (разработка ведётся на Node 22)
 - npm
+- Кластер PostgreSQL (см. `DATABASE_URL`)
 
 ## Переменные окружения
 
 Создайте `.env.local` в корне проекта:
 
 ```env
-PUBLIC_SUPABASE_URL=
-PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=   # только сервер, без префикса PUBLIC_
+DATABASE_URL=postgresql://...   # Yandex Postgres, sslmode=require
+AUTH_SECRET=                    # минимум 32 символа, для подписи сессии (JWT)
+CRON_SECRET=                    # опционально, для /api/cron/expire-invites
 ```
+
+Supabase больше не используется. Старые `PUBLIC_SUPABASE_*` / `SUPABASE_SERVICE_ROLE_KEY` можно удалить.
+
+## Первый запуск (после миграций)
+
+```bash
+npm run db:migrate -- supabase/migrations/017_auth_passwords.sql
+
+# при необходимости сбросить тестовых пользователей Supabase Auth
+node scripts/reset-auth-users.mjs
+
+node scripts/create-admin.mjs admin@example.com 'YourPassword'
+```
+
+Тестовые пользователи (опционально): `npm run db:seed-test-users`
 
 ## Запуск
 
 ```bash
-# установка зависимостей
 npm install
-
-# режим разработки (http://localhost:3000)
-npm run dev
-
-# production-сборка
+npm run dev          # http://localhost:3000
 npm run build
-
-# запуск production-сборки
 npm run start
-
-# линтер
 npm run lint
 ```
+
+## Скрипты БД
+
+| Команда | Назначение |
+|---------|------------|
+| `npm run db:migrate -- supabase/migrations/<file>.sql` | применить миграцию на Yandex |
+| `npm run db:verify-yandex` | проверка подключения и счётчиков |
+| `npm run db:seed-test-users` | демо-пользователи (кроме admin) |
+| `npm run cron:expire-invites` | cron F007 (нужен `DATABASE_URL`) |
 
 ## Структура
 
 ```
 src/
-├── app/
-│   ├── (auth)/login/          # вход
-│   ├── (admin)/admin/         # админ-панель
-│   ├── (procurement)/app/     # рабочее место снабженца
-│   └── (supplier)/supplier/   # кабинет поставщика
-├── components/                # UI-компоненты (shadcn/ui в components/ui)
-├── lib/supabase/              # клиенты Supabase (browser / server)
-└── actions/                   # Server Actions
-supabase/
-└── migrations/                # SQL-миграции
+├── app/                       # маршруты (auth, admin, app, supplier, …)
+├── components/
+├── lib/
+│   ├── auth/                  # JWT-сессия, пароли, auth.users
+│   ├── db/                    # pool, RLS-сессия, PostgREST-shim, SQL-запросы
+│   ├── app-client.ts          # серверный клиент данных (с RLS)
+│   └── admin-client.ts        # клиент без userId (cron, admin)
+└── actions/
+supabase/migrations/           # SQL-миграции (применяются на Yandex)
+scripts/                       # create-admin, seed, migrate, …
 ```
 
 ## Документация
 
-Полная документация проекта (архитектура, модель данных, фичи, планы) —
-в [`ai_docs/README.md`](ai_docs/README.md).
+Полная документация проекта — в [`ai_docs/README.md`](ai_docs/README.md).

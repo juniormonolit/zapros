@@ -9,7 +9,8 @@ import {
   isSourcingStatus,
   type SourcingStatus,
 } from "@/lib/sourcing";
-import { createClient } from "@/lib/supabase/server";
+import { ensureRows } from "@/lib/db/types";
+import { createClient } from "@/lib/app-client";
 
 import type { CatalogActionState } from "@/actions/admin-catalog-types";
 
@@ -328,7 +329,7 @@ export async function setGroupMembers(
   }
 
   const existing = new Set(
-    (current ?? []).map((row) => String(row.supplier_id)),
+    ensureRows(current).map((row) => String(row.supplier_id)),
   );
 
   const toAdd = [...selected].filter((id) => !existing.has(id));

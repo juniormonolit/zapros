@@ -1,16 +1,26 @@
+import { redirect } from "next/navigation";
+
 import { ADMIN_NAV } from "@/components/navigation/nav-config";
 import { NavLinks } from "@/components/navigation/nav-links";
 import { Topbar } from "@/components/navigation/topbar";
+import { getProfile, homeRouteForRole } from "@/lib/auth";
 
 /**
- * Admin shell: shared topbar plus a section sidebar (Пользователи / Поставщики
- * / Группы / Bitrix / Настройки). On mobile the sidebar collapses into a
- * horizontally scrollable tab row. Only admin navigation is rendered here, so
- * other roles never see these entries (access is also enforced by middleware).
+ * Admin shell with role guard (defence in depth; middleware is auth-only).
  */
-export default function AdminLayout({
+export default async function AdminLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const profile = await getProfile();
+
+  if (!profile || !profile.is_active) {
+    redirect("/login");
+  }
+
+  if (profile.role !== "admin") {
+    redirect(homeRouteForRole(profile.role));
+  }
+
   return (
     <div className="flex min-h-svh flex-col bg-bg-primary">
       <Topbar />

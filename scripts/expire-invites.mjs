@@ -3,28 +3,19 @@
 // Usage:
 //   npm run cron:expire-invites
 //
-// Reads SUPABASE_SERVICE_ROLE_KEY and NEXT_PUBLIC_SUPABASE_URL from the
-// environment, falling back to .env.local (same manual parse as apply-migration).
+// Requires DATABASE_URL (.env.local or process.env).
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
-import { createClient } from "@supabase/supabase-js";
 
+import { createAdminClient } from "../src/lib/admin-client.ts";
 import { runExpireInvites } from "../src/lib/expire-invites.ts";
 
-/**
- * Loads a single env var from process.env or .env.local.
- */
 function getEnv(name) {
   if (process.env[name]) {
     return process.env[name];
   }
-
-  /** @type {Record<string, string[]>} */
-  const aliases = {
-    NEXT_PUBLIC_SUPABASE_URL: ["PUBLIC_SUPABASE_URL"],
-  };
 
   try {
     const envFile = readFileSync(resolve(process.cwd(), ".env.local"), "utf8");
@@ -37,21 +28,10 @@ function getEnv(name) {
       const key = line.slice(0, eq).trim();
       parsed[key] = line.slice(eq + 1).trim().replace(/^['"]|['"]$/g, "");
     }
-
-    if (parsed[name]) {
-      return parsed[name];
-    }
-
-    for (const alias of aliases[name] ?? []) {
-      if (parsed[alias]) {
-        return parsed[alias];
-      }
-    }
+    return parsed[name];
   } catch {
-    // .env.local missing — fail below with a clear message.
+    return undefined;
   }
-
-  return undefined;
 }
 
 function requireEnv(name) {
@@ -64,16 +44,9 @@ function requireEnv(name) {
 }
 
 async function main() {
-  const supabaseUrl = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
-  const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+  requireEnv("DATABASE_URL");
 
-  const admin = createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
-
+  const admin = createAdminClient();
   const now = new Date();
   const result = await runExpireInvites(admin, now);
 

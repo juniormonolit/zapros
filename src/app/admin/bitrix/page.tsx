@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import type { BitrixSetting } from "@/actions/admin-catalog-types";
 import { BitrixManager } from "@/components/admin/bitrix-manager";
 import { getProfile } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { ensureRows } from "@/lib/db/types";
+import { createClient } from "@/lib/app-client";
 
 /**
  * Bitrix group settings admin section: CRUD over the URL templates the task
@@ -21,5 +22,11 @@ export default async function AdminBitrixPage() {
     .select("id, name, url_template, is_active, created_at")
     .order("name", { ascending: true });
 
-  return <BitrixManager settings={(data as BitrixSetting[]) ?? []} />;
+  return (
+    <BitrixManager
+      settings={
+        ensureRows(data) as unknown as BitrixSetting[]
+      }
+    />
+  );
 }

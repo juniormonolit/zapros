@@ -18,7 +18,10 @@ import {
   describeDeadline,
   requestSupplierStatusPresentation,
 } from "@/lib/request-status";
-import { createClient } from "@/lib/supabase/server";
+import { getUser } from "@/lib/auth";
+import { loadSupplierInviteDetail } from "@/lib/db/queries/supplier-invite-detail";
+import { ensureRows } from "@/lib/db/types";
+import { createClient } from "@/lib/app-client";
 
 /** Invite statuses that block new response submissions. */
 const FINAL_INVITE_STATUSES = new Set(["lost", "won", "no_response"]);
@@ -88,15 +91,22 @@ export default async function SupplierResponsePage({
   params: Promise<{ inviteId: string }>;
 }) {
   const { inviteId } = await params;
-  const supabase = await createClient();
+  const user = await getUser();
+  if (!user) notFound();
 
-  const { data: inviteRow } = await supabase
-    .from("request_suppliers")
-    .select(
-      "id, status, sent_at, deadline_at, timer_paused_at, requests!request_suppliers_request_id_fkey(id, request_code, status, payment_form, needs_delivery, sent_at, tasks(bitrix_task_number, title, deal_title))",
-    )
-    .eq("id", inviteId)
-    .maybeSingle<InviteRow>();
+  const supabase = await createClient();
+  const loaded = await loadSupplierInviteDetail(user.id, inviteId);
+
+  const inviteRow: InviteRow | null = loaded
+    ? {
+        id: loaded.id,
+        status: loaded.status,
+        sent_at: loaded.sent_at,
+        deadline_at: loaded.deadline_at,
+        timer_paused_at: loaded.timer_paused_at,
+        requests: loaded.requests,
+      }
+    : null;
 
   const request = unwrapRequest(inviteRow?.requests ?? null);
   if (!inviteRow || !request || !isAccessibleInvite(inviteRow, request)) {
@@ -114,7 +124,7 @@ export default async function SupplierResponsePage({
   ]);
 
   const items: ResponseFormItem[] = (
-    (itemsData as RequestItemRow[] | null) ?? []
+    ensureRows(itemsData) as unknown as RequestItemRow[]
   ).map((row) => ({
     id: row.id,
     name: row.name,

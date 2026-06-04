@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import type { Supplier } from "@/actions/admin-catalog-types";
 import { SupplierManager } from "@/components/admin/supplier-manager";
 import { getProfile } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { ensureRows } from "@/lib/db/types";
+import { createClient } from "@/lib/app-client";
 
 /**
  * Suppliers admin section. Access is gated three ways: middleware (route),
@@ -24,5 +25,9 @@ export default async function AdminSuppliersPage() {
     )
     .order("name", { ascending: true });
 
-  return <SupplierManager suppliers={(data as Supplier[]) ?? []} />;
+  return (
+    <SupplierManager
+      suppliers={ensureRows(data) as unknown as Supplier[]}
+    />
+  );
 }

@@ -1,21 +1,15 @@
 import { RequestsTableView } from "@/components/requests/requests-table-view";
 import { buildRequestFilterOptions } from "@/lib/request-filter-options";
-import {
-  REQUEST_LIST_SELECT,
-  mapRequestRowsToListItems,
-  type RequestRow,
-} from "@/lib/requests-list-data";
-import { createClient } from "@/lib/supabase/server";
+import { loadRequestListRows } from "@/lib/db/queries/request-list";
+import { mapRequestRowsToListItems } from "@/lib/requests-list-data";
+import { getUser } from "@/lib/auth";
 
 /** Tabular request view with the same filters as `/app/requests`. */
 export default async function ProcurementTablePage() {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("requests")
-    .select(REQUEST_LIST_SELECT)
-    .order("created_at", { ascending: false });
+  const user = await getUser();
+  if (!user) return null;
 
-  const rows = (data as RequestRow[] | null) ?? [];
+  const rows = await loadRequestListRows(user.id);
   const items = mapRequestRowsToListItems(rows, new Date());
   const filterOptions = buildRequestFilterOptions(items);
 

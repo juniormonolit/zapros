@@ -7,7 +7,8 @@ import type {
 } from "@/actions/admin-catalog-types";
 import { GroupManager } from "@/components/admin/group-manager";
 import { getProfile } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { ensureRows } from "@/lib/db/types";
+import { createClient } from "@/lib/app-client";
 
 /**
  * Supplier groups admin section: group CRUD plus many-to-many membership
@@ -38,9 +39,11 @@ export default async function AdminGroupsPage() {
 
   return (
     <GroupManager
-      groups={(groupsResult.data as SupplierGroup[]) ?? []}
-      suppliers={(suppliersResult.data as Supplier[]) ?? []}
-      members={(membersResult.data as SupplierGroupMember[]) ?? []}
+      groups={ensureRows(groupsResult.data) as unknown as SupplierGroup[]}
+      suppliers={ensureRows(suppliersResult.data) as unknown as Supplier[]}
+      members={
+        ensureRows(membersResult.data) as unknown as SupplierGroupMember[]
+      }
     />
   );
 }

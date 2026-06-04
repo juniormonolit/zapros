@@ -10,12 +10,14 @@
 | `procurement` | CRUD своих `tasks`, `requests`; чтение всех `request_suppliers` и ответов **своих** запросов |
 | `supplier` | Только `request_suppliers` где `supplier_id = profile.supplier_id`; свои ответы и треды |
 
-## Регистрация и invite (MVP)
+## Регистрация (MVP)
 
-1. Админ создаёт пользователя в настройках (email, роль, привязка к `supplier_id` для поставщиков).
-2. Supabase Admin API (server-only): `inviteUserByEmail` или временный пароль.
-3. Первый вход — смена пароля (рекомендуется, фаза 1.1 если не в MVP).
-4. Саморегистрация **отключена**.
+1. Админ создаёт пользователя в настройках (email, роль, пароль ≥ 8 символов, привязка к `supplier_id` для поставщиков).
+2. Server-only: `createAuthUser` в `src/lib/auth/users.server.ts` (INSERT в `auth.users` + bcrypt).
+3. Триггер создаёт `profiles`; admin upsert задаёт роль и `supplier_id`.
+4. Саморегистрация **отключена**. Invite по email **не реализован** (только пароль при создании).
+
+Сессия: JWT в cookie `zapros_session` (`AUTH_SECRET`). См. [database-yandex.md](./database-yandex.md).
 
 ## Создание `profiles`
 
@@ -23,9 +25,9 @@
 - Роль и `supplier_id` проставляет admin-экшен сразу после invite (никогда не с клиента).
 - Единственный `admin` гарантируется частичным уникальным индексом (см. data-model.md); попытка создать второго админа отклоняется на уровне БД и в UI.
 
-## JWT и профиль
+## Сессия и профиль
 
-После login: загрузка `profiles` по `auth.uid()`. Middleware Next.js проверяет роль для маршрутов:
+После login: JWT `sub` = `auth.users.id`; в запросах к БД выставляется `request.jwt.claim.sub` для `auth.uid()`. Middleware проверяет только наличие сессии; роль — в layouts и `/auth/redirect`:
 
 - `/admin/*` — admin
 - `/app/*` — procurement
@@ -76,7 +78,9 @@
 
 ## Серверные операции
 
-Использовать `SUPABASE_SERVICE_ROLE_KEY` только в:
+`createAdminClient()` (без userId в RLS-сессии) — для cron и операций, где табличный owner обходит RLS. Ранее использовался Supabase service role; см. [database-yandex.md](./database-yandex.md).
+
+Исторически service role применялся в:
 
 - Server Actions: парсер, invite пользователя, cron таймера
 - Никогда в Client Components

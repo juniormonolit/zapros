@@ -8,7 +8,8 @@ import {
   fetchRequestCountsByTask,
   type RequestCounts,
 } from "@/lib/request-counters";
-import { createClient } from "@/lib/supabase/server";
+import { ensureRows } from "@/lib/db/types";
+import { createClient } from "@/lib/app-client";
 
 /**
  * Procurement task list (`/app`). Server Component: loads tasks with the
@@ -25,7 +26,7 @@ export default async function ProcurementTasksPage() {
     )
     .order("created_at", { ascending: false });
 
-  const tasks = (data as TaskListItem[] | null) ?? [];
+  const tasks = ensureRows(data) as unknown as TaskListItem[];
 
   // One aggregated query for every visible task (no N+1). The view is
   // RLS-scoped, so counters only reflect requests the current user may see.

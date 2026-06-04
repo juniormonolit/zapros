@@ -36,21 +36,23 @@ export function RequestsTableView({
 
   return (
     <div className="flex flex-col gap-4">
-      <RequestFilters
-        draft={draft}
-        onDraftChange={setDraft}
-        applied={applied}
-        onApply={() => setApplied({ ...draft })}
-        onReset={() => {
-          const reset = applyPresetInWork();
-          setDraft(reset);
-          setApplied(reset);
-          setShowCompleted(false);
-        }}
-        showCompleted={showCompleted}
-        onShowCompletedChange={setShowCompleted}
-        options={filterOptions}
-      />
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <RequestFilters
+          draft={draft}
+          onDraftChange={setDraft}
+          applied={applied}
+          onApply={() => setApplied({ ...draft })}
+          onReset={() => {
+            const reset = applyPresetInWork();
+            setDraft(reset);
+            setApplied(reset);
+            setShowCompleted(false);
+          }}
+          showCompleted={showCompleted}
+          onShowCompletedChange={setShowCompleted}
+          options={filterOptions}
+        />
+      </div>
       <RequestTable items={filtered} />
     </div>
   );

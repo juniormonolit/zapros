@@ -18,28 +18,14 @@ import { parseCashToNoncashRatio } from "@/lib/price-compare";
 import { requestStatusPresentation } from "@/lib/request-status";
 import { loadThreadEventsByInviteIds } from "@/lib/request-events";
 import { loadVersionsForInvites } from "@/lib/response-versions";
+import { getUser } from "@/lib/auth";
+import {
+  loadRequestDetail,
+  loadRequestSuppliersWithNames,
+} from "@/lib/db/queries/request-detail";
 import { loadAvailableSuppliers } from "@/lib/suppliers-available";
-import { createClient } from "@/lib/supabase/server";
-
-/** Joined parent-task columns for the breadcrumb link and heading. */
-interface RequestTaskJoin {
-  bitrix_task_number: number | null;
-  title: string | null;
-  deal_title: string | null;
-}
-
-/** Shape of a `requests` row loaded for the detail card (RLS-scoped). */
-interface RequestRecord {
-  id: string;
-  request_code: string;
-  status: string;
-  payment_form: PaymentForm | null;
-  needs_delivery: boolean;
-  comment: string | null;
-  sent_at: string | null;
-  task_id: string;
-  tasks: RequestTaskJoin | null;
-}
+import { ensureRow, ensureRows } from "@/lib/db/types";
+import { createClient } from "@/lib/app-client";
 
 /** A `request_items` snapshot row. */
 interface RequestItemRow {
@@ -48,18 +34,6 @@ interface RequestItemRow {
   quantity: number | null;
   unit: string | null;
   sort_order: number;
-}
-
-/** An invite row joined with the supplier's name. */
-interface RequestSupplierRow {
-  id: string;
-  supplier_id: string;
-  status: string;
-  sent_at: string | null;
-  deadline_at: string | null;
-  timer_paused_at: string | null;
-  first_response_at: string | null;
-  suppliers: { name: string } | null;
 }
 
 const PAYMENT_FORM_LABELS: Record<PaymentForm, string> = {
@@ -147,34 +121,25 @@ export default async function RequestDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const user = await getUser();
+  if (!user) notFound();
+
   const supabase = await createClient();
 
-  const { data: request } = await supabase
-    .from("requests")
-    .select(
-      "id, request_code, status, payment_form, needs_delivery, comment, sent_at, task_id, tasks(bitrix_task_number, title, deal_title)",
-    )
-    .eq("id", id)
-    .maybeSingle<RequestRecord>();
+  const request = await loadRequestDetail(user.id, id);
 
   if (!request) {
     notFound();
   }
 
-  const [{ data: itemsData }, { data: invitesData }, { data: ratioSetting }] =
+  const [{ data: itemsData }, inviteRows, { data: ratioSetting }] =
     await Promise.all([
       supabase
         .from("request_items")
         .select("id, name, quantity, unit, sort_order")
         .eq("request_id", id)
         .order("sort_order", { ascending: true }),
-      supabase
-        .from("request_suppliers")
-        .select(
-          "id, supplier_id, status, sent_at, deadline_at, timer_paused_at, first_response_at, suppliers!request_suppliers_supplier_id_fkey(name)",
-        )
-        .eq("request_id", id)
-        .order("created_at", { ascending: true }),
+      loadRequestSuppliersWithNames(user.id, id),
       supabase
         .from("app_settings")
         .select("value")
@@ -182,15 +147,17 @@ export default async function RequestDetailPage({
         .maybeSingle(),
     ]);
 
-  const items = (itemsData as RequestItemRow[] | null) ?? [];
-  const invites = (invitesData as RequestSupplierRow[] | null) ?? [];
+  const items = ensureRows(itemsData) as unknown as RequestItemRow[];
 
-  const inviteIds = invites.map((invite) => invite.id);
+  const inviteIds = inviteRows.map((invite) => invite.id);
   const [versionsByInvite, eventsByInvite] = await Promise.all([
     loadVersionsForInvites(supabase, inviteIds),
     loadThreadEventsByInviteIds(supabase, inviteIds),
   ]);
-  const cashToNoncashRatio = parseCashToNoncashRatio(ratioSetting?.value);
+  const ratioRow = ensureRow(ratioSetting);
+  const cashToNoncashRatio = parseCashToNoncashRatio(
+    ratioRow ? String(ratioRow.value) : undefined,
+  );
   const now = new Date();
 
   const status = requestStatusPresentation(request.status);
@@ -200,7 +167,7 @@ export default async function RequestDetailPage({
   // A supplier can only be added once the request has actually been sent;
   // drafts go through the normal send flow instead (REQ-009).
   const isSent = request.status !== "draft" && Boolean(request.sent_at);
-  const invitedSupplierIds = invites.map((invite) => invite.supplier_id);
+  const invitedSupplierIds = inviteRows.map((invite) => invite.supplier_id);
   const availableSuppliers = isSent ? await loadAvailableSuppliers() : null;
 
   return (
@@ -288,7 +255,7 @@ export default async function RequestDetailPage({
                 <RequestFinalizationControls
                   requestId={request.id}
                   requestStatus={request.status}
-                  invites={invites.map((invite) => ({
+                  invites={inviteRows.map((invite) => ({
                     id: invite.id,
                     supplierName: invite.suppliers?.name ?? "Поставщик",
                     status: invite.status,
@@ -320,7 +287,7 @@ export default async function RequestDetailPage({
               quantity: item.quantity,
               unit: item.unit,
             }))}
-            suppliers={invites.map((invite) => ({
+            suppliers={inviteRows.map((invite) => ({
               inviteId: invite.id,
               supplierName: invite.suppliers?.name ?? "Поставщик",
               status: invite.status,
@@ -335,13 +302,13 @@ export default async function RequestDetailPage({
         </CardContent>
       </Card>
 
-      {invites.length > 0 ? (
+      {inviteRows.length > 0 ? (
         <Card>
           <CardHeader>
             <CardTitle>Переписка с поставщиками</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            {invites.map((invite) => (
+            {inviteRows.map((invite) => (
               <InviteCommunicationPanel
                 key={invite.id}
                 supplierName={invite.suppliers?.name ?? "Поставщик"}

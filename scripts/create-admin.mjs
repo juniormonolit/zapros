@@ -1,26 +1,20 @@
-// Bootstrap the first admin user.
+// Bootstrap the first admin user on Yandex Postgres (native auth).
 //
 // Usage:
 //   node scripts/create-admin.mjs <email> <password>
 //   ADMIN_EMAIL=... ADMIN_PASSWORD=... node scripts/create-admin.mjs
 //
-// Reads PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from the environment,
-// falling back to a manual parse of .env.local (same approach as
-// apply-migration.mjs). Secrets are NEVER hardcoded and never logged.
-//
-// Respects the `one_admin` partial unique index: if an admin already exists the
-// script reports it and exits 0 instead of failing.
+// Requires DATABASE_URL and applies migration 017 (encrypted_password) if needed.
 
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 
-import { createClient } from "@supabase/supabase-js";
+import bcrypt from "bcryptjs";
 
-/**
- * Parses .env.local into a plain object. Values may be quoted; a single pair of
- * surrounding quotes is stripped. Returns {} when the file is absent.
- */
+import { createPgClient, getDatabaseUrl } from "./db-connect.mjs";
+
 function loadEnvFile() {
   const env = {};
   try {
@@ -31,34 +25,27 @@ function loadEnvFile() {
       const eq = line.indexOf("=");
       if (eq === -1) continue;
       const key = line.slice(0, eq).trim();
-      const value = line
+      env[key] = line
         .slice(eq + 1)
         .trim()
         .replace(/^['"]|['"]$/g, "");
-      env[key] = value;
     }
   } catch {
-    // Missing .env.local is fine; we validate required values below.
+    // optional
   }
   return env;
 }
 
-/** Reads a value from process.env first, then the parsed .env.local. */
 function readValue(fileEnv, name) {
   return process.env[name] ?? fileEnv[name];
 }
 
 async function main() {
   const fileEnv = loadEnvFile();
+  const databaseUrl = getDatabaseUrl();
 
-  const supabaseUrl = readValue(fileEnv, "PUBLIC_SUPABASE_URL");
-  const serviceRoleKey = readValue(fileEnv, "SUPABASE_SERVICE_ROLE_KEY");
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    console.error(
-      "Error: PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required " +
-        "(checked process.env and .env.local).",
-    );
+  if (!databaseUrl) {
+    console.error("Error: DATABASE_URL is required (.env.local or process.env).");
     process.exit(1);
   }
 
@@ -70,98 +57,71 @@ async function main() {
   if (!email || !password) {
     console.error(
       "Error: admin email and password are required.\n" +
-        "Usage: node scripts/create-admin.mjs <email> <password>\n" +
-        "   or: ADMIN_EMAIL=... ADMIN_PASSWORD=... node scripts/create-admin.mjs",
+        "Usage: node scripts/create-admin.mjs <email> <password>",
     );
     process.exit(1);
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const client = createPgClient(databaseUrl);
+  await client.connect();
 
-  // 1. Refuse to create a second admin (the DB index would reject it anyway).
-  const { count, error: countError } = await supabase
-    .from("profiles")
-    .select("id", { count: "exact", head: true })
-    .eq("role", "admin");
-
-  if (countError) {
-    console.error("Error: could not query existing admins:", countError.message);
-    process.exit(1);
-  }
-
-  if ((count ?? 0) > 0) {
-    console.log(
-      "An admin already exists (one_admin constraint). Nothing to do.",
+  try {
+    const { rows: admins } = await client.query(
+      `select id from public.profiles where role = 'admin' limit 1`,
     );
-    process.exit(0);
-  }
-
-  // 2. Create the auth user with a confirmed email so it can log in at once.
-  const { data: created, error: createError } =
-    await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-    });
-
-  if (createError || !created.user) {
-    console.error(
-      "Error: could not create auth user:",
-      createError?.message ?? "unknown error",
-    );
-    process.exit(1);
-  }
-
-  const userId = created.user.id;
-
-  // 3. Promote the trigger-created profile to admin (upsert is idempotent).
-  const { error: profileError } = await supabase.from("profiles").upsert(
-    {
-      id: userId,
-      role: "admin",
-      full_name: "Administrator",
-      is_active: true,
-    },
-    { onConflict: "id" },
-  );
-
-  if (profileError) {
-    // Clean up the orphaned auth user so the script can be retried.
-    await supabase.auth.admin.deleteUser(userId);
-
-    if (profileError.code === "23505") {
-      console.log(
-        "An admin already exists (one_admin constraint). Rolled back the new auth user.",
-      );
-      process.exit(0);
+    if (admins.length > 0) {
+      console.log("An admin already exists (one_admin constraint). Nothing to do.");
+      return;
     }
-    console.error("Error: could not set admin profile:", profileError.message);
-    process.exit(1);
-  }
 
-  // 4. Verify end-to-end and report (without logging the password).
-  const { data: profile, error: verifyError } = await supabase
-    .from("profiles")
-    .select("id, role, is_active")
-    .eq("id", userId)
-    .single();
+    const id = randomUUID();
+    const encrypted = await bcrypt.hash(password, 12);
 
-  if (verifyError || !profile) {
-    console.error(
-      "Warning: admin created but verification read failed:",
-      verifyError?.message ?? "no profile returned",
+    await client.query("BEGIN");
+    try {
+      await client.query(
+        `
+        insert into auth.users (id, email, encrypted_password)
+        values ($1, $2, $3)
+        `,
+        [id, email, encrypted],
+      );
+
+      await client.query(
+        `
+        insert into public.profiles (id, role, full_name, is_active)
+        values ($1, 'admin', 'Administrator', true)
+        on conflict (id) do update
+        set role = 'admin', full_name = 'Administrator', is_active = true
+        `,
+        [id],
+      );
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    }
+
+    const { rows: profile } = await client.query(
+      `select id, role, is_active from public.profiles where id = $1`,
+      [id],
     );
-    process.exit(1);
-  }
 
-  console.log("First admin created successfully.");
-  console.log(`  email:      ${email}`);
-  console.log(`  user id:    ${profile.id}`);
-  console.log(`  role:       ${profile.role}`);
-  console.log(`  is_active:  ${profile.is_active}`);
-  console.log("Log in with the email and the password you supplied.");
+    if (!profile[0]) {
+      console.error("Warning: admin created but verification read failed.");
+      process.exit(1);
+    }
+
+    console.log("First admin created successfully.");
+    console.log(`  email:      ${email}`);
+    console.log(`  user id:    ${profile[0].id}`);
+    console.log(`  role:       ${profile[0].role}`);
+    console.log(`  is_active:  ${profile[0].is_active}`);
+    console.log("Log in with the email and password you supplied.");
+  } finally {
+    await client.end();
+  }
 }
 
 main().catch((err) => {

@@ -1,7 +1,6 @@
 # Тестовые пользователи (demo)
 
 Сгенерировано скриптом `scripts/seed-test-users.mjs`.
-Пароль у всех одинаковый — только для dev/staging.
 
 **Пароль:** `ZaprosParty3!`
 
@@ -32,4 +31,3 @@
 ## Вход
 
 - URL: `/login`
-- После входа: procurement → `/app`, senior → `/sourcing`, supplier → `/supplier`

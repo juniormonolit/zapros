@@ -13,7 +13,8 @@
  *   - completed  = terminal (outcome set, or won/lost/no_response/cancelled)
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { DbClient } from "@/lib/db/client";
+import { ensureRow, ensureRows } from "@/lib/db/types";
 
 /** Counts shown as "завершено / в работе / всего" on a task. */
 export interface RequestCounts {
@@ -62,7 +63,7 @@ function toCounts(row: CounterRow): RequestCounts {
  * {@link EMPTY_REQUEST_COUNTS} at the call site.
  */
 export async function fetchRequestCountsByTask(
-  supabase: SupabaseClient,
+  supabase: DbClient,
   taskIds: string[],
 ): Promise<Map<string, RequestCounts>> {
   const counts = new Map<string, RequestCounts>();
@@ -73,7 +74,7 @@ export async function fetchRequestCountsByTask(
     .select(COLUMNS)
     .in("task_id", taskIds);
 
-  for (const row of (data as CounterRow[] | null) ?? []) {
+  for (const row of ensureRows(data) as unknown as CounterRow[]) {
     counts.set(row.task_id, toCounts(row));
   }
   return counts;
@@ -84,14 +85,15 @@ export async function fetchRequestCountsByTask(
  * {@link EMPTY_REQUEST_COUNTS} when the task has no (sent) requests.
  */
 export async function fetchRequestCountsForTask(
-  supabase: SupabaseClient,
+  supabase: DbClient,
   taskId: string,
 ): Promise<RequestCounts> {
   const { data } = await supabase
     .from(VIEW)
     .select(COLUMNS)
     .eq("task_id", taskId)
-    .maybeSingle<CounterRow>();
+    .maybeSingle();
 
-  return data ? toCounts(data) : EMPTY_REQUEST_COUNTS;
+  const row = ensureRow(data) as unknown as CounterRow | null;
+  return row ? toCounts(row) : EMPTY_REQUEST_COUNTS;
 }

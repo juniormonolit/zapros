@@ -1,4 +1,5 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { DbClient } from "@/lib/db/client";
+import { ensureRows } from "@/lib/db/types";
 
 import {
   INVITE_STATUS_IN_PROGRESS,
@@ -19,8 +20,8 @@ interface InviteRow {
  * and can be reused from thread quick signals for a single invite.
  */
 export async function applyInProgressToInvites(
-  admin: SupabaseClient,
-  supabase: SupabaseClient,
+  admin: DbClient,
+  supabase: DbClient,
   params: {
     requestId: string;
     authorId: string;
@@ -40,7 +41,7 @@ export async function applyInProgressToInvites(
   const { data, error } = await query;
   if (error) return "Не удалось загрузить приглашения.";
 
-  const invites = (data ?? []) as InviteRow[];
+  const invites = ensureRows(data) as unknown as InviteRow[];
   const targets = invites.filter(
     (invite) =>
       THREAD_ACTIVE_INVITE_STATUSES.has(invite.status) &&

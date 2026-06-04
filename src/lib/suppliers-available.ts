@@ -4,7 +4,8 @@ import type {
   PickerGroup,
   PickerSupplier,
 } from "@/components/requests/supplier-picker";
-import { createClient } from "@/lib/supabase/server";
+import { ensureRows } from "@/lib/db/types";
+import { createClient } from "@/lib/app-client";
 
 /**
  * Sourcing stages a supplier must be at to be selectable in a request
@@ -67,9 +68,11 @@ export async function loadAvailableSuppliers(): Promise<AvailableSuppliersData> 
     supabase.from("supplier_group_members").select("group_id, supplier_id"),
   ]);
 
-  const suppliers = (suppliersResult.data as PickerSupplier[] | null) ?? [];
-  const groupRows = (groupsResult.data as GroupRow[] | null) ?? [];
-  const memberRows = (membersResult.data as MemberRow[] | null) ?? [];
+  const suppliers = ensureRows(
+    suppliersResult.data,
+  ) as unknown as PickerSupplier[];
+  const groupRows = ensureRows(groupsResult.data) as unknown as GroupRow[];
+  const memberRows = ensureRows(membersResult.data) as unknown as MemberRow[];
 
   return buildAvailableSuppliersData(suppliers, groupRows, memberRows);
 }

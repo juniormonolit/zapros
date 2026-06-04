@@ -1,7 +1,7 @@
 # zapros — документация проекта
 
 **Версия спецификации:** 2026-06-01  
-**Стек:** Next.js 15 (App Router) + TypeScript + Supabase + Tailwind + shadcn/ui
+**Стек:** Next.js 15 (App Router) + TypeScript + Yandex PostgreSQL + Tailwind + shadcn/ui
 
 ## Назначение
 
@@ -22,6 +22,7 @@
 - [Обзор системы](develop/architecture/zapros-overview.md)
 - [Модель данных](develop/architecture/data-model.md)
 - [Auth и RLS](develop/architecture/auth-rls.md)
+- [БД Yandex и доступ из приложения](develop/architecture/database-yandex.md)
 - [Статусы и переходы](develop/architecture/status-machines.md)
 
 ### Фичи
@@ -46,10 +47,12 @@
 ## Переменные окружения
 
 ```env
-PUBLIC_SUPABASE_URL=
-PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=   # только сервер, без префикса PUBLIC_
+DATABASE_URL=              # Yandex Postgres
+AUTH_SECRET=               # JWT сессии (≥ 32 символов)
+CRON_SECRET=               # опционально, cron expire-invites
 ```
+
+Production: `env.production.example` → `.env.production` на сервере.
 
 ## Вне MVP
 

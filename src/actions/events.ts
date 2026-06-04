@@ -32,8 +32,8 @@ import {
   REQUEST_EVENT_REQUEST_UPDATED,
   REQUEST_EVENT_SIGNAL_IN_PROGRESS,
 } from "@/lib/request-events-types";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/admin-client";
+import { createClient } from "@/lib/app-client";
 
 const PROCUREMENT_ROLES = new Set(["procurement", "admin"]);
 

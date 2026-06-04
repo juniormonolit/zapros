@@ -23,6 +23,8 @@ function getDatabaseUrl() {
     return process.env.DATABASE_URL;
   }
 
+  let databaseUrlFromFile;
+
   try {
     const envFile = readFileSync(resolve(process.cwd(), ".env.local"), "utf8");
     for (const rawLine of envFile.split(/\r?\n/)) {
@@ -33,9 +35,14 @@ function getDatabaseUrl() {
       const key = line.slice(0, eq).trim();
       if (key === "DATABASE_URL") {
         // Value may be quoted; strip a single pair of surrounding quotes.
-        return line.slice(eq + 1).trim().replace(/^['"]|['"]$/g, "");
+        // Last wins so a commented-out Supabase URL above does not shadow Yandex.
+        databaseUrlFromFile = line
+          .slice(eq + 1)
+          .trim()
+          .replace(/^['"]|['"]$/g, "");
       }
     }
+    if (databaseUrlFromFile) return databaseUrlFromFile;
   } catch {
     // .env.local missing is fine; we just fail below with a clear message.
   }
@@ -59,6 +66,16 @@ function parseDatabaseUrl(databaseUrl) {
   };
 }
 
+/** Yandex MPG cannot CREATE ROLE authenticated/anon; RLS uses PUBLIC + auth.uid() checks. */
+function isYandexTarget(databaseUrl) {
+  if (process.env.DB_PLATFORM === "yandex") return true;
+  return databaseUrl.includes("yandexcloud.net");
+}
+
+function adaptSqlForYandex(sql) {
+  return sql.replace(/\bto authenticated\b/gi, "to public");
+}
+
 async function main() {
   const sqlPathArg = process.argv[2];
   if (!sqlPathArg) {
@@ -76,7 +93,11 @@ async function main() {
   }
 
   const sqlPath = resolve(process.cwd(), sqlPathArg);
-  const sql = readFileSync(sqlPath, "utf8");
+  let sql = readFileSync(sqlPath, "utf8");
+  const yandex = isYandexTarget(databaseUrl);
+  if (yandex) {
+    sql = adaptSqlForYandex(sql);
+  }
 
   // Build a discrete config (host/port/user/password/database) instead of
   // passing the connection string straight to pg. This decodes the password
@@ -88,7 +109,9 @@ async function main() {
     ssl: { rejectUnauthorized: false },
   });
 
-  console.log(`Applying migration: ${sqlPathArg}`);
+  console.log(
+    `Applying migration: ${sqlPathArg}${yandex ? " (Yandex: to authenticated → to public)" : ""}`,
+  );
 
   try {
     await client.connect();

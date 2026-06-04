@@ -3,15 +3,16 @@
 // Usage:
 //   node scripts/seed-test-users.mjs
 //
-// Creates 3 procurement, 3 senior_procurement, 3 supplier users with fun names.
-// Idempotent: skips emails that already exist in auth.
-// Prints credentials to stdout; does NOT log service role key.
+// Requires DATABASE_URL. Idempotent: skips emails that already exist.
 
+import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 
-import { createClient } from "@supabase/supabase-js";
+import bcrypt from "bcryptjs";
+
+import { createPgClient, getDatabaseUrl } from "./db-connect.mjs";
 
 const TEST_PASSWORD = "ZaprosParty3!";
 const EMAIL_DOMAIN = "demo.zapros.test";
@@ -76,83 +77,61 @@ function emailFor(slug) {
   return `${slug}@${EMAIL_DOMAIN}`.toLowerCase();
 }
 
-async function listAuthEmails(supabase) {
-  const emails = new Set();
-  let page = 1;
-  for (;;) {
-    const { data, error } = await supabase.auth.admin.listUsers({
-      page,
-      perPage: 1000,
-    });
-    if (error) throw new Error(error.message);
-    for (const user of data.users) {
-      if (user.email) emails.add(user.email.toLowerCase());
-    }
-    if (data.users.length < 1000) break;
-    page += 1;
-  }
-  return emails;
+async function listAuthEmails(client) {
+  const { rows } = await client.query(
+    `select lower(email) as email from auth.users where email is not null`,
+  );
+  return new Set(rows.map((r) => r.email));
 }
 
-async function ensureSupplierCompany(supabase, name) {
-  const { data: existing } = await supabase
-    .from("suppliers")
-    .select("id, name")
-    .eq("name", name)
-    .maybeSingle();
+async function ensureSupplierCompany(client, name) {
+  const { rows: existing } = await client.query(
+    `select id from public.suppliers where name = $1 limit 1`,
+    [name],
+  );
+  if (existing[0]) return existing[0].id;
 
-  if (existing) return existing.id;
-
-  const { data: created, error } = await supabase
-    .from("suppliers")
-    .insert({
-      name,
-      is_active: true,
-      sourcing_status: "working_in_zapros",
-      works_in_zapros: true,
-    })
-    .select("id")
-    .single();
-
-  if (error || !created) {
-    throw new Error(`supplier "${name}": ${error?.message ?? "insert failed"}`);
-  }
-  return created.id;
+  const { rows: created } = await client.query(
+    `
+    insert into public.suppliers (name, is_active, sourcing_status, works_in_zapros)
+    values ($1, true, 'working_in_zapros', true)
+    returning id
+    `,
+    [name],
+  );
+  return created[0].id;
 }
 
-async function createUser(supabase, params) {
+async function createUser(client, params) {
   const { email, password, role, fullName, supplierId } = params;
+  const id = randomUUID();
+  const encrypted = await bcrypt.hash(password, 12);
 
-  const { data: created, error: createError } =
-    await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-    });
-
-  if (createError || !created.user) {
-    throw new Error(createError?.message ?? "auth create failed");
+  await client.query("BEGIN");
+  try {
+    await client.query(
+      `insert into auth.users (id, email, encrypted_password) values ($1, $2, $3)`,
+      [id, email, encrypted],
+    );
+    await client.query(
+      `
+      insert into public.profiles (id, role, full_name, is_active, supplier_id)
+      values ($1, $2, $3, true, $4)
+      on conflict (id) do update
+      set role = excluded.role,
+          full_name = excluded.full_name,
+          supplier_id = excluded.supplier_id,
+          is_active = true
+      `,
+      [id, role, fullName, supplierId],
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
   }
 
-  const userId = created.user.id;
-  const profile = {
-    id: userId,
-    role,
-    full_name: fullName,
-    is_active: true,
-    supplier_id: role === "supplier" ? supplierId : null,
-  };
-
-  const { error: profileError } = await supabase
-    .from("profiles")
-    .upsert(profile, { onConflict: "id" });
-
-  if (profileError) {
-    await supabase.auth.admin.deleteUser(userId);
-    throw new Error(profileError.message);
-  }
-
-  return userId;
+  return id;
 }
 
 function renderMarkdown(rows) {
@@ -160,7 +139,6 @@ function renderMarkdown(rows) {
     "# Тестовые пользователи (demo)",
     "",
     "Сгенерировано скриптом `scripts/seed-test-users.mjs`.",
-    "Пароль у всех одинаковый — только для dev/staging.",
     "",
     `**Пароль:** \`${TEST_PASSWORD}\``,
     "",
@@ -184,110 +162,108 @@ function renderMarkdown(rows) {
     lines.push(`| ${row.fullName} | ${row.companyName ?? "—"} | ${row.email} |`);
   }
 
-  lines.push("", "## Вход", "", "- URL: `/login`", "- После входа: procurement → `/app`, senior → `/sourcing`, supplier → `/supplier`", "");
+  lines.push("", "## Вход", "", "- URL: `/login`", "");
   return lines.join("\n");
 }
 
 async function main() {
-  const fileEnv = loadEnvFile();
-  const supabaseUrl = readValue(fileEnv, "PUBLIC_SUPABASE_URL");
-  const serviceRoleKey = readValue(fileEnv, "SUPABASE_SERVICE_ROLE_KEY");
+  const databaseUrl = getDatabaseUrl();
 
-  if (!supabaseUrl || !serviceRoleKey) {
-    console.error(
-      "Error: PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.",
-    );
+  if (!databaseUrl) {
+    console.error("Error: DATABASE_URL is required.");
     process.exit(1);
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const client = createPgClient(databaseUrl);
+  await client.connect();
 
-  const existingEmails = await listAuthEmails(supabase);
-  /** @type {Array<{role:string,fullName:string,email:string,companyName?:string,status:string}>} */
-  const report = [];
+  try {
+    const existingEmails = await listAuthEmails(client);
+    const report = [];
 
-  for (const user of PROCUREMENT_USERS) {
-    const email = emailFor(user.slug);
-    if (existingEmails.has(email)) {
-      report.push({ role: "procurement", ...user, email, status: "skipped (exists)" });
-      continue;
+    for (const user of PROCUREMENT_USERS) {
+      const email = emailFor(user.slug);
+      if (existingEmails.has(email)) {
+        report.push({ role: "procurement", ...user, email, status: "skipped (exists)" });
+        continue;
+      }
+      await createUser(client, {
+        email,
+        password: TEST_PASSWORD,
+        role: "procurement",
+        fullName: user.fullName,
+      });
+      report.push({ role: "procurement", ...user, email, status: "created" });
     }
-    await createUser(supabase, {
-      email,
-      password: TEST_PASSWORD,
-      role: "procurement",
-      fullName: user.fullName,
-    });
-    report.push({ role: "procurement", ...user, email, status: "created" });
-  }
 
-  for (const user of SENIOR_USERS) {
-    const email = emailFor(user.slug);
-    if (existingEmails.has(email)) {
+    for (const user of SENIOR_USERS) {
+      const email = emailFor(user.slug);
+      if (existingEmails.has(email)) {
+        report.push({
+          role: "senior_procurement",
+          ...user,
+          email,
+          status: "skipped (exists)",
+        });
+        continue;
+      }
+      await createUser(client, {
+        email,
+        password: TEST_PASSWORD,
+        role: "senior_procurement",
+        fullName: user.fullName,
+      });
       report.push({
         role: "senior_procurement",
         ...user,
         email,
-        status: "skipped (exists)",
+        status: "created",
       });
-      continue;
     }
-    await createUser(supabase, {
-      email,
-      password: TEST_PASSWORD,
-      role: "senior_procurement",
-      fullName: user.fullName,
-    });
-    report.push({
-      role: "senior_procurement",
-      ...user,
-      email,
-      status: "created",
-    });
-  }
 
-  for (const user of SUPPLIER_USERS) {
-    const email = emailFor(user.slug);
-    const supplierId = await ensureSupplierCompany(supabase, user.companyName);
-    if (existingEmails.has(email)) {
+    for (const user of SUPPLIER_USERS) {
+      const email = emailFor(user.slug);
+      const supplierId = await ensureSupplierCompany(client, user.companyName);
+      if (existingEmails.has(email)) {
+        report.push({
+          role: "supplier",
+          fullName: user.fullName,
+          companyName: user.companyName,
+          email,
+          status: "skipped (exists)",
+        });
+        continue;
+      }
+      await createUser(client, {
+        email,
+        password: TEST_PASSWORD,
+        role: "supplier",
+        fullName: user.fullName,
+        supplierId,
+      });
       report.push({
         role: "supplier",
         fullName: user.fullName,
         companyName: user.companyName,
         email,
-        status: "skipped (exists)",
+        status: "created",
       });
-      continue;
     }
-    await createUser(supabase, {
-      email,
-      password: TEST_PASSWORD,
-      role: "supplier",
-      fullName: user.fullName,
-      supplierId,
-    });
-    report.push({
-      role: "supplier",
-      fullName: user.fullName,
-      companyName: user.companyName,
-      email,
-      status: "created",
-    });
-  }
 
-  const docPath = resolve(process.cwd(), "ai_docs/develop/test-users.md");
-  writeFileSync(docPath, renderMarkdown(report), "utf8");
+    const docPath = resolve(process.cwd(), "ai_docs/develop/test-users.md");
+    writeFileSync(docPath, renderMarkdown(report), "utf8");
 
-  console.log("Test users seed complete.\n");
-  console.log(`Password (all): ${TEST_PASSWORD}\n`);
-  for (const row of report) {
-    const extra = row.companyName ? ` · ${row.companyName}` : "";
-    console.log(`[${row.status}] ${row.role}: ${row.fullName}${extra}`);
-    console.log(`         ${row.email}`);
+    console.log("Test users seed complete.\n");
+    console.log(`Password (all): ${TEST_PASSWORD}\n`);
+    for (const row of report) {
+      const extra = row.companyName ? ` · ${row.companyName}` : "";
+      console.log(`[${row.status}] ${row.role}: ${row.fullName}${extra}`);
+      console.log(`         ${row.email}`);
+    }
+    console.log(`\nSaved: ai_docs/develop/test-users.md`);
+  } finally {
+    await client.end();
   }
-  console.log(`\nSaved: ai_docs/develop/test-users.md`);
 }
 
 main().catch((err) => {

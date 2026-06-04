@@ -1,7 +1,7 @@
 "use client";
 
 import { Filter } from "lucide-react";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useId, useState } from "react";
 
 import { FilterDrawer } from "@/components/filters/filter-drawer";
 import { Button } from "@/components/ui/button";
@@ -231,21 +231,13 @@ function FiltersPanel(props: RequestFiltersProps & { statusId: string; presetId:
 }
 
 /**
- * Shared request filters: desktop panel + mobile drawer.
+ * Shared request filters: opens in a right-side drawer (F005 / kanban-and-filters-ux).
+ * Keeps the main area for list/kanban; avoids a full-width filter panel on desktop.
  */
 export function RequestFilters(props: RequestFiltersProps) {
   const statusId = useId();
   const presetId = useId();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    const update = () => setIsMobile(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
 
   const handleApply = () => {
     props.onApply();
@@ -267,41 +259,25 @@ export function RequestFilters(props: RequestFiltersProps) {
     />
   );
 
-  if (isMobile) {
-    return (
-      <>
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full sm:w-auto"
-          onClick={() => setDrawerOpen(true)}
-        >
-          <Filter className="size-4" />
-          Фильтры
-        </Button>
-        <FilterDrawer
-          open={drawerOpen}
-          onOpenChange={setDrawerOpen}
-          title="Фильтры запросов"
-        >
-          {panel}
-        </FilterDrawer>
-      </>
-    );
-  }
-
   return (
-    <CardPanel>
-      <h2 className="text-sm font-medium text-text-secondary">Фильтры</h2>
-      {panel}
-    </CardPanel>
-  );
-}
-
-function CardPanel({ children }: { children: ReactNode }) {
-  return (
-    <div className="rounded-xl border border-border-primary bg-bg-card p-4">
-      {children}
-    </div>
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setDrawerOpen(true)}
+      >
+        <Filter className="size-4" />
+        Фильтры
+      </Button>
+      <FilterDrawer
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        title="Фильтры запросов"
+        className="max-w-md"
+      >
+        {panel}
+      </FilterDrawer>
+    </>
   );
 }

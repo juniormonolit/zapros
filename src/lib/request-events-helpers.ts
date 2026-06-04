@@ -1,4 +1,5 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { DbClient } from "@/lib/db/client";
+import { ensureRow, ensureRows } from "@/lib/db/types";
 
 import type {
   RequestEventType,
@@ -52,44 +53,38 @@ export function failEvent(error: string): { ok: false; error: string } {
 }
 
 export async function loadInviteEventContext(
-  supabase: SupabaseClient,
+  supabase: DbClient,
   requestSupplierId: string,
 ): Promise<InviteEventContext | null> {
   const { data, error } = await supabase
     .from("request_suppliers")
     .select(
-      `
-      id,
-      supplier_id,
-      status,
-      first_response_at,
-      timer_paused_at,
-      deadline_at,
-      request_id,
-      requests!request_suppliers_request_id_fkey ( status )
-    `,
+      "id, supplier_id, status, first_response_at, timer_paused_at, deadline_at, request_id",
     )
     .eq("id", requestSupplierId)
     .maybeSingle();
 
-  if (error || !data) return null;
+  const invite = ensureRow(data);
+  if (error || !invite) return null;
 
-  const requestRow = data.requests as
-    | { status: string }
-    | { status: string }[]
-    | null;
-  const request = Array.isArray(requestRow) ? requestRow[0] : requestRow;
-  if (!request) return null;
+  const { data: requestData, error: requestError } = await supabase
+    .from("requests")
+    .select("status")
+    .eq("id", String(invite.request_id))
+    .maybeSingle();
+
+  const request = ensureRow(requestData);
+  if (requestError || !request) return null;
 
   return {
-    id: data.id as string,
-    supplierId: data.supplier_id as string,
-    status: data.status as string,
-    firstResponseAt: (data.first_response_at as string | null) ?? null,
-    timerPausedAt: (data.timer_paused_at as string | null) ?? null,
-    deadlineAt: (data.deadline_at as string | null) ?? null,
-    requestId: data.request_id as string,
-    requestStatus: request.status,
+    id: String(invite.id),
+    supplierId: String(invite.supplier_id),
+    status: String(invite.status),
+    firstResponseAt: (invite.first_response_at as string | null) ?? null,
+    timerPausedAt: (invite.timer_paused_at as string | null) ?? null,
+    deadlineAt: (invite.deadline_at as string | null) ?? null,
+    requestId: String(invite.request_id),
+    requestStatus: String(request.status),
   };
 }
 
@@ -106,7 +101,7 @@ export function validateThreadAccess(
 }
 
 export async function insertRequestEvent(
-  supabase: SupabaseClient,
+  supabase: DbClient,
   params: {
     requestSupplierId: string;
     authorId: string;
@@ -126,7 +121,7 @@ export async function insertRequestEvent(
 }
 
 export async function insertStatusChangeEvent(
-  supabase: SupabaseClient,
+  supabase: DbClient,
   params: {
     requestSupplierId: string;
     authorId: string;
@@ -184,7 +179,7 @@ export function aggregateRequestStatus(
 }
 
 export async function loadInviteStatusesForRequest(
-  supabase: SupabaseClient,
+  supabase: DbClient,
   requestId: string,
 ): Promise<string[] | null> {
   const { data, error } = await supabase
@@ -192,12 +187,12 @@ export async function loadInviteStatusesForRequest(
     .select("status")
     .eq("request_id", requestId);
   if (error) return null;
-  return (data ?? []).map((row) => row.status as string);
+  return ensureRows(data).map((row) => String(row.status));
 }
 
 export async function syncRequestStatusFromInvites(
-  admin: SupabaseClient,
-  supabase: SupabaseClient,
+  admin: DbClient,
+  supabase: DbClient,
   params: {
     requestId: string;
     currentRequestStatus: string;

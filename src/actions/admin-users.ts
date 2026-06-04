@@ -5,7 +5,14 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 
 import { getProfile, type UserRole } from "@/lib/auth";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  createAuthUser,
+  deleteAuthUser,
+  emailExists,
+  listAuthUsers,
+} from "@/lib/auth/users.server";
+import { ensureRows } from "@/lib/db/types";
+import { createAdminClient } from "@/lib/admin-client";
 
 const ADMIN_USERS_PATH = "/admin/users";
 const VALID_ROLES: readonly UserRole[] = [
@@ -16,7 +23,6 @@ const VALID_ROLES: readonly UserRole[] = [
 ];
 const MIN_PASSWORD_LENGTH = 8;
 
-/** A single row rendered in the admin users table. */
 export interface AdminUserRow {
   id: string;
   email: string | null;
@@ -27,44 +33,28 @@ export interface AdminUserRow {
   is_active: boolean;
 }
 
-/** Supplier option for the role=supplier select. */
 export interface SupplierOption {
   id: string;
   name: string;
 }
 
-/**
- * State returned by {@link createUser} for `useActionState`. Exactly one of
- * `error` / `success` is non-null after a submission.
- */
 export interface CreateUserState {
   error: string | null;
   success: string | null;
 }
 
-/** Friendly message shown whenever a second admin is attempted. */
 const SINGLE_ADMIN_MESSAGE =
   "Администратор уже существует. В системе допускается только один администратор.";
 
-/**
- * Returns true when the caller is an authenticated admin. Authorization is
- * re-checked on the server for every privileged action (defence in depth on top
- * of the route middleware).
- */
 async function isCallerAdmin(): Promise<boolean> {
   const profile = await getProfile();
   return profile?.role === "admin";
 }
 
-/** Helper to build a failed {@link CreateUserState}. */
 function fail(error: string): CreateUserState {
   return { error, success: null };
 }
 
-/**
- * Lists every profile with its email (resolved from `auth.users`), role,
- * linked supplier and active flag. Admin-only.
- */
 export async function listUsers(): Promise<AdminUserRow[]> {
   if (!(await isCallerAdmin())) {
     throw new Error("Доступ запрещён.");
@@ -72,50 +62,60 @@ export async function listUsers(): Promise<AdminUserRow[]> {
 
   const admin = createAdminClient();
 
-  const { data: profiles, error } = await admin
+  const { data: profilesData, error } = await admin
     .from("profiles")
-    .select(
-      "id, role, full_name, supplier_id, is_active, suppliers!profiles_supplier_id_fkey(name)",
-    )
+    .select("id, role, full_name, supplier_id, is_active")
     .order("created_at", { ascending: true });
 
   if (error) {
     throw new Error("Не удалось загрузить список пользователей.");
   }
 
-  // Emails live in auth.users, not in profiles; resolve them via the admin API.
-  const { data: authList, error: authError } =
-    await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  const profiles = ensureRows(profilesData);
 
-  if (authError) {
-    throw new Error("Не удалось загрузить данные аутентификации.");
+  const supplierIds = [
+    ...new Set(
+      profiles
+        .map((row) => row.supplier_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  ];
+
+  const supplierNameById = new Map<string, string>();
+  if (supplierIds.length > 0) {
+    const { data: suppliersData, error: suppliersError } = await admin
+      .from("suppliers")
+      .select("id, name")
+      .in("id", supplierIds);
+    if (suppliersError) {
+      throw new Error("Не удалось загрузить поставщиков.");
+    }
+    for (const s of ensureRows(suppliersData)) {
+      supplierNameById.set(String(s.id), String(s.name));
+    }
   }
 
   const emailById = new Map(
-    authList.users.map((user) => [user.id, user.email ?? null]),
+    (await listAuthUsers()).map((user) => [user.id, user.email]),
   );
 
-  return (profiles ?? []).map((row) => {
-    // Supabase infers the embedded to-one relation as an array; at runtime it
-    // is a single object (or null). Normalize both shapes defensively.
-    const rawSupplier = row.suppliers as
-      | { name: string }
-      | { name: string }[]
-      | null;
-    const supplier = Array.isArray(rawSupplier) ? rawSupplier[0] : rawSupplier;
+  return profiles.map((row) => {
+    const supplierId =
+      typeof row.supplier_id === "string" ? row.supplier_id : null;
     return {
-      id: row.id,
-      email: emailById.get(row.id) ?? null,
+      id: String(row.id),
+      email: emailById.get(String(row.id)) ?? null,
       role: row.role as UserRole,
-      full_name: row.full_name,
-      supplier_id: row.supplier_id,
-      supplier_name: supplier?.name ?? null,
-      is_active: row.is_active,
+      full_name: row.full_name as string | null,
+      supplier_id: supplierId,
+      supplier_name: supplierId
+        ? (supplierNameById.get(supplierId) ?? null)
+        : null,
+      is_active: Boolean(row.is_active),
     };
   });
 }
 
-/** Lists active suppliers for the create-user form select. Admin-only. */
 export async function listSuppliers(): Promise<SupplierOption[]> {
   if (!(await isCallerAdmin())) {
     throw new Error("Доступ запрещён.");
@@ -132,21 +132,12 @@ export async function listSuppliers(): Promise<SupplierOption[]> {
     throw new Error("Не удалось загрузить список поставщиков.");
   }
 
-  return (data ?? []) as SupplierOption[];
+  return ensureRows(data).map((row) => ({
+    id: String(row.id),
+    name: String(row.name),
+  }));
 }
 
-/**
- * Creates an auth user and provisions their profile (role, name, supplier).
- *
- * Shaped for `useActionState`. Validation rules:
- * - email is required;
- * - role must be one of the known roles;
- * - role=supplier requires a supplier_id;
- * - only one admin may exist (checked here AND guarded by the `one_admin`
- *   partial unique index, whose 23505 error is also handled).
- *
- * If no password is provided an invite email is sent instead (passwordless).
- */
 export async function createUser(
   _prevState: CreateUserState,
   formData: FormData,
@@ -170,20 +161,21 @@ export async function createUser(
     return fail("Выберите роль.");
   }
 
-  // supplier_id only applies to suppliers; ignore it for other roles.
   const supplierId = role === "supplier" ? rawSupplierId || null : null;
   if (role === "supplier" && !supplierId) {
     return fail("Для роли «поставщик» необходимо выбрать поставщика.");
   }
 
-  if (password && password.length < MIN_PASSWORD_LENGTH) {
-    return fail(`Пароль должен содержать минимум ${MIN_PASSWORD_LENGTH} символов.`);
+  if (!password || password.length < MIN_PASSWORD_LENGTH) {
+    return fail(`Пароль обязателен (минимум ${MIN_PASSWORD_LENGTH} символов).`);
+  }
+
+  if (await emailExists(email)) {
+    return fail("Пользователь с таким email уже существует.");
   }
 
   const admin = createAdminClient();
 
-  // Application-level single-admin guard with a clear message; the DB index is
-  // the backstop against races.
   if (role === "admin") {
     const { count } = await admin
       .from("profiles")
@@ -195,28 +187,17 @@ export async function createUser(
     }
   }
 
-  // Create the auth user. With a password we confirm the email immediately so
-  // the account can log in right away; without one we send an invite email.
-  const { data: createdData, error: createError } = password
-    ? await admin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-      })
-    : await admin.auth.admin.inviteUserByEmail(email);
-
-  if (createError || !createdData.user) {
-    const message = createError?.message ?? "";
-    if (/already|exists|registered/i.test(message)) {
+  let userId: string;
+  try {
+    ({ id: userId } = await createAuthUser({ email, password }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    if (/unique|duplicate|already/i.test(message)) {
       return fail("Пользователь с таким email уже существует.");
     }
     return fail("Не удалось создать пользователя.");
   }
 
-  const userId = createdData.user.id;
-
-  // The handle_new_user trigger inserts a default profile row; upsert promotes
-  // it with the chosen role/name/supplier. onConflict=id keeps it idempotent.
   const { error: profileError } = await admin
     .from("profiles")
     .upsert(
@@ -230,8 +211,7 @@ export async function createUser(
     );
 
   if (profileError) {
-    // Roll back the orphaned auth user so a retry can succeed cleanly.
-    await admin.auth.admin.deleteUser(userId);
+    await deleteAuthUser(userId);
 
     if (profileError.code === "23505") {
       return fail(SINGLE_ADMIN_MESSAGE);
@@ -241,16 +221,9 @@ export async function createUser(
 
   revalidatePath(ADMIN_USERS_PATH);
 
-  const action = password ? "создан" : "приглашён по email";
-  return { error: null, success: `Пользователь ${email} ${action}.` };
+  return { error: null, success: `Пользователь ${email} создан.` };
 }
 
-/**
- * Enables or disables a user account (`profiles.is_active`). Admin-only.
- *
- * An admin cannot deactivate their own account, preventing accidental lockout
- * given the single-admin constraint. Bound to a form via `.bind`.
- */
 export async function setUserActive(
   profileId: string,
   isActive: boolean,
