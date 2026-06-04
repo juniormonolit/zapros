@@ -4,7 +4,7 @@
 //   node scripts/apply-migration.mjs supabase/migrations/001_enums_profiles.sql
 //
 // Reads DATABASE_URL from the environment. If it is not already set, it is
-// loaded from .env.local (simple manual parse, no extra dependency). The
+// loaded from .env.production / .env.local if not in process.env. The
 // connection string / password is NEVER hardcoded here and is never logged.
 
 import { readFileSync } from "node:fs";
@@ -12,59 +12,9 @@ import { resolve } from "node:path";
 import process from "node:process";
 import pg from "pg";
 
+import { getDatabaseUrl, parseDatabaseUrl } from "./db-connect.mjs";
+
 const { Client } = pg;
-
-/**
- * Loads DATABASE_URL from process.env, falling back to a manual parse of
- * .env.local. Returns the connection string without ever printing it.
- */
-function getDatabaseUrl() {
-  if (process.env.DATABASE_URL) {
-    return process.env.DATABASE_URL;
-  }
-
-  let databaseUrlFromFile;
-
-  try {
-    const envFile = readFileSync(resolve(process.cwd(), ".env.local"), "utf8");
-    for (const rawLine of envFile.split(/\r?\n/)) {
-      const line = rawLine.trim();
-      if (!line || line.startsWith("#")) continue;
-      const eq = line.indexOf("=");
-      if (eq === -1) continue;
-      const key = line.slice(0, eq).trim();
-      if (key === "DATABASE_URL") {
-        // Value may be quoted; strip a single pair of surrounding quotes.
-        // Last wins so a commented-out Supabase URL above does not shadow Yandex.
-        databaseUrlFromFile = line
-          .slice(eq + 1)
-          .trim()
-          .replace(/^['"]|['"]$/g, "");
-      }
-    }
-    if (databaseUrlFromFile) return databaseUrlFromFile;
-  } catch {
-    // .env.local missing is fine; we just fail below with a clear message.
-  }
-
-  return undefined;
-}
-
-/**
- * Parses a postgres connection URL into discrete pg client fields. The
- * password is URL-decoded so special characters in the URL-encoded form are
- * handled correctly and never depend on pg's own string parsing.
- */
-function parseDatabaseUrl(databaseUrl) {
-  const url = new URL(databaseUrl);
-  return {
-    host: url.hostname,
-    port: url.port ? Number(url.port) : 5432,
-    user: decodeURIComponent(url.username),
-    password: decodeURIComponent(url.password),
-    database: url.pathname.replace(/^\//, "") || "postgres",
-  };
-}
 
 /** Yandex MPG cannot CREATE ROLE authenticated/anon; RLS uses PUBLIC + auth.uid() checks. */
 function isYandexTarget(databaseUrl) {
@@ -87,7 +37,7 @@ async function main() {
   const databaseUrl = getDatabaseUrl();
   if (!databaseUrl) {
     console.error(
-      "Error: DATABASE_URL is not set (checked process.env and .env.local).",
+      "Error: DATABASE_URL is not set (checked process.env, .env.production, .env.local).",
     );
     process.exit(1);
   }

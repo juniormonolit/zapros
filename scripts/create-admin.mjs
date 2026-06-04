@@ -7,52 +7,26 @@
 // Requires DATABASE_URL and applies migration 017 (encrypted_password) if needed.
 
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import process from "node:process";
 
 import bcrypt from "bcryptjs";
 
-import { createPgClient, getDatabaseUrl } from "./db-connect.mjs";
-
-function loadEnvFile() {
-  const env = {};
-  try {
-    const file = readFileSync(resolve(process.cwd(), ".env.local"), "utf8");
-    for (const rawLine of file.split(/\r?\n/)) {
-      const line = rawLine.trim();
-      if (!line || line.startsWith("#")) continue;
-      const eq = line.indexOf("=");
-      if (eq === -1) continue;
-      const key = line.slice(0, eq).trim();
-      env[key] = line
-        .slice(eq + 1)
-        .trim()
-        .replace(/^['"]|['"]$/g, "");
-    }
-  } catch {
-    // optional
-  }
-  return env;
-}
-
-function readValue(fileEnv, name) {
-  return process.env[name] ?? fileEnv[name];
-}
+import { createPgClient, getDatabaseUrl, getEnvValue } from "./db-connect.mjs";
 
 async function main() {
-  const fileEnv = loadEnvFile();
   const databaseUrl = getDatabaseUrl();
 
   if (!databaseUrl) {
-    console.error("Error: DATABASE_URL is required (.env.local or process.env).");
+    console.error(
+      "Error: DATABASE_URL is required (.env.production, .env.local, or process.env).",
+    );
     process.exit(1);
   }
 
-  const email = (process.argv[2] ?? readValue(fileEnv, "ADMIN_EMAIL") ?? "")
+  const email = (process.argv[2] ?? getEnvValue("ADMIN_EMAIL") ?? "")
     .trim()
     .toLowerCase();
-  const password = process.argv[3] ?? readValue(fileEnv, "ADMIN_PASSWORD") ?? "";
+  const password = process.argv[3] ?? getEnvValue("ADMIN_PASSWORD") ?? "";
 
   if (!email || !password) {
     console.error(

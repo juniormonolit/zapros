@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-function loadEnvFile(): Record<string, string> {
+const ENV_FILES = [".env.production", ".env.local"];
+
+function parseEnvFile(filename: string): Record<string, string> {
   const vars: Record<string, string> = {};
   try {
-    const envFile = readFileSync(resolve(process.cwd(), ".env.local"), "utf8");
+    const envFile = readFileSync(resolve(process.cwd(), filename), "utf8");
     for (const rawLine of envFile.split(/\r?\n/)) {
       const line = rawLine.trim();
       if (!line || line.startsWith("#")) continue;
@@ -15,8 +17,6 @@ function loadEnvFile(): Record<string, string> {
         .slice(eq + 1)
         .trim()
         .replace(/^['"]|['"]$/g, "");
-      // Guard against a corrupted .env.local where the next key was appended
-      // to DATABASE_URL on the same line (e.g. ...?sslmode=requireAUTH_SECRET=).
       if (key === "DATABASE_URL") {
         const corrupt = value.match(/^(.*\?sslmode=require)([A-Z_]+=.*)$/);
         if (corrupt) {
@@ -29,9 +29,17 @@ function loadEnvFile(): Record<string, string> {
       vars[key] = value;
     }
   } catch {
-    // optional .env.local
+    // optional file
   }
   return vars;
+}
+
+function loadEnvFile(): Record<string, string> {
+  const merged: Record<string, string> = {};
+  for (const file of ENV_FILES) {
+    Object.assign(merged, parseEnvFile(file));
+  }
+  return merged;
 }
 
 function sanitizeDatabaseUrl(url: string): string {
@@ -49,7 +57,7 @@ export function getDatabaseUrl(): string {
   if (fileEnv.DATABASE_URL) return sanitizeDatabaseUrl(fileEnv.DATABASE_URL);
 
   throw new Error(
-    'Missing DATABASE_URL. Add it to .env.local (Yandex connection string).',
+    'Missing DATABASE_URL. Add it to .env.production or .env.local.',
   );
 }
 
