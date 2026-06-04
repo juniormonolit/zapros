@@ -45,6 +45,9 @@ async function main() {
     );
     if (admins.length > 0) {
       console.log("An admin already exists (one_admin constraint). Nothing to do.");
+      console.log(
+        "To reset the admin password: node scripts/set-user-password.mjs <email> <password>",
+      );
       return;
     }
 

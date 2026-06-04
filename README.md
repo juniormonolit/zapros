@@ -37,6 +37,8 @@ npm run db:migrate -- supabase/migrations/017_auth_passwords.sql
 node scripts/reset-auth-users.mjs
 
 node scripts/create-admin.mjs admin@example.com 'YourPassword'
+# если admin уже есть, но логин не работает:
+node scripts/set-user-password.mjs admin@example.com 'YourPassword'
 ```
 
 Тестовые пользователи (опционально): `npm run db:seed-test-users`
