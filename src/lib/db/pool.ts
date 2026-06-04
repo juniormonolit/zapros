@@ -12,8 +12,8 @@ export function getPool(): pg.Pool {
   if (!pool) {
     pool = new Pool({
       ...parseDatabaseUrl(getDatabaseUrl()),
-      max: 10,
-      connectionTimeoutMillis: 15_000,
+      max: 20,
+      connectionTimeoutMillis: 30_000,
       idleTimeoutMillis: 30_000,
       keepAlive: true,
     });

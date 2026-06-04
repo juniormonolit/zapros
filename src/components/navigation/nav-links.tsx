@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Layers,
+  LayoutGrid,
   Link as LinkIcon,
   Settings,
   Truck,
@@ -21,6 +22,7 @@ const ICONS: Record<string, LucideIcon> = {
   layers: Layers,
   link: LinkIcon,
   settings: Settings,
+  "layout-grid": LayoutGrid,
 };
 
 type Orientation = "horizontal" | "vertical";

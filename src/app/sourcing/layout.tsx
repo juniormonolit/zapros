@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { ViewAsBoardPanel } from "@/components/admin/view-as-board-panel";
 import { getProfile, homeRouteForRole } from "@/lib/auth";
 import { NavLinks } from "@/components/navigation/nav-links";
 import { SOURCING_NAV } from "@/components/navigation/nav-config";
@@ -8,8 +9,8 @@ import { Topbar } from "@/components/navigation/topbar";
 /**
  * Senior-procurement shell: shared topbar plus a single "Проработка" tab.
  * Mirrors the supplier/procurement layouts and adds a server-side guard so the
- * section is reachable only by `senior_procurement` (middleware enforces the
- * same rule; this is defence in depth and covers direct server renders).
+ * section is reachable by `senior_procurement` or `admin` (middleware enforces
+ * role rules; this is defence in depth and covers direct server renders).
  */
 export default async function SourcingLayout({
   children,
@@ -20,13 +21,17 @@ export default async function SourcingLayout({
     redirect("/login");
   }
 
-  if (profile.role !== "senior_procurement") {
+  if (
+    profile.role !== "senior_procurement" &&
+    profile.role !== "admin"
+  ) {
     redirect(homeRouteForRole(profile.role));
   }
 
   return (
     <div className="flex min-h-svh flex-col bg-bg-primary">
       <Topbar />
+      <ViewAsBoardPanel />
       <div className="border-b border-border-primary bg-bg-card">
         <div className="overflow-x-auto px-4 sm:px-6">
           <NavLinks items={SOURCING_NAV} orientation="horizontal" />

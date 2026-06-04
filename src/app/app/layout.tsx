@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { ViewAsBoardPanel } from "@/components/admin/view-as-board-panel";
 import { PROCUREMENT_NAV } from "@/components/navigation/nav-config";
 import { NavLinks } from "@/components/navigation/nav-links";
 import { Topbar } from "@/components/navigation/topbar";
@@ -21,13 +22,14 @@ export default async function ProcurementLayout({
     redirect("/login");
   }
 
-  if (profile.role !== "procurement") {
+  if (profile.role !== "procurement" && profile.role !== "admin") {
     redirect(homeRouteForRole(profile.role));
   }
 
   return (
     <div className="flex min-h-svh flex-col bg-bg-primary">
       <Topbar />
+      <ViewAsBoardPanel />
       <div className="border-b border-border-primary bg-bg-card">
         <div className="overflow-x-auto px-4 sm:px-6">
           <NavLinks items={PROCUREMENT_NAV} orientation="horizontal" />

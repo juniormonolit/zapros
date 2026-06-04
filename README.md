@@ -24,6 +24,7 @@
 DATABASE_URL=postgresql://...   # Yandex Postgres, sslmode=require
 AUTH_SECRET=                    # минимум 32 символа, для подписи сессии (JWT)
 CRON_SECRET=                    # опционально, для /api/cron/expire-invites
+ENABLE_ADMIN_VIEW_AS=true       # production: admin «просмотр от лица» на /sourcing, /app, /supplier (false — отключить)
 ```
 
 Supabase больше не используется. Старые `PUBLIC_SUPABASE_*` / `SUPABASE_SERVICE_ROLE_KEY` можно удалить.

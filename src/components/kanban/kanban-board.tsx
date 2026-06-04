@@ -14,6 +14,20 @@ import type { useRequestKanbanDnd } from "@/components/kanban/use-request-kanban
 import type { KanbanColumnDef } from "@/lib/kanban-config";
 import { cn } from "@/lib/utils";
 
+type RequestKanbanDnd = ReturnType<typeof useRequestKanbanDnd>;
+
+/** Shared drag-and-drop handle for procurement and sourcing kanban boards. */
+export type KanbanDndHandle<TStatus extends string = string> = Omit<
+  RequestKanbanDnd,
+  "moveToStatus"
+> & {
+  moveToStatus: (
+    itemId: string,
+    fromStatus: string,
+    targetStatus: TStatus,
+  ) => void;
+};
+
 function statusKeyForColumn<TStatus extends string>(
   column: KanbanColumnDef<TStatus>,
 ): TStatus {
@@ -33,7 +47,7 @@ interface KanbanBoardProps<TItem, TStatus extends string> {
     },
   ) => ReactNode;
   readOnly?: boolean;
-  dnd?: ReturnType<typeof useRequestKanbanDnd>;
+  dnd?: KanbanDndHandle<TStatus>;
   currentStatusById?: Map<string, string>;
   emptyHint?: string;
   className?: string;

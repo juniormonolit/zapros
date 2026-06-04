@@ -5,12 +5,8 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 
 import { getProfile, type UserRole } from "@/lib/auth";
-import {
-  createAuthUser,
-  deleteAuthUser,
-  emailExists,
-  listAuthUsers,
-} from "@/lib/auth/users.server";
+import { createAuthUserWithProfile } from "@/lib/auth/provision-user.server";
+import { emailExists, listAuthUsers } from "@/lib/auth/users.server";
 import { ensureRows } from "@/lib/db/types";
 import { createAdminClient } from "@/lib/admin-client";
 
@@ -187,36 +183,19 @@ export async function createUser(
     }
   }
 
-  let userId: string;
-  try {
-    ({ id: userId } = await createAuthUser({ email, password }));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "";
-    if (/unique|duplicate|already/i.test(message)) {
-      return fail("Пользователь с таким email уже существует.");
-    }
-    return fail("Не удалось создать пользователя.");
-  }
+  const created = await createAuthUserWithProfile({
+    email,
+    password,
+    role,
+    fullName: fullName || null,
+    supplierId,
+  });
 
-  const { error: profileError } = await admin
-    .from("profiles")
-    .upsert(
-      {
-        id: userId,
-        role,
-        full_name: fullName || null,
-        supplier_id: supplierId,
-      },
-      { onConflict: "id" },
-    );
-
-  if (profileError) {
-    await deleteAuthUser(userId);
-
-    if (profileError.code === "23505") {
+  if (!created.ok) {
+    if (role === "admin" && created.code === "23505") {
       return fail(SINGLE_ADMIN_MESSAGE);
     }
-    return fail("Не удалось сохранить профиль пользователя.");
+    return fail(created.error);
   }
 
   revalidatePath(ADMIN_USERS_PATH);

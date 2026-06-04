@@ -8,6 +8,7 @@ import {
   type UserRole,
 } from "@/lib/auth";
 import { setSessionCookie, clearSessionCookie } from "@/lib/auth/session.server";
+import { clearViewAsCookie } from "@/lib/view-as";
 import { findUserByEmail } from "@/lib/auth/users.server";
 import { verifyPassword } from "@/lib/auth/password";
 import { createDataClient } from "@/lib/db/client";
@@ -78,5 +79,6 @@ export async function signIn(
 
 export async function signOut(): Promise<void> {
   await clearSessionCookie();
+  await clearViewAsCookie();
   redirect("/login");
 }
