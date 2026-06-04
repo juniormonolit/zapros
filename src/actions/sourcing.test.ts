@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+/**
+ * F010 sourcing actions — regression anchor for F012 supplier-org (SRC-710):
+ * org CRUD lives in supplier-org.test.ts; these tests must keep passing when
+ * /admin/suppliers or junction tables change.
+ */
+
 vi.mock("server-only", () => ({}));
 
 vi.mock("next/cache", () => ({
@@ -32,12 +38,15 @@ vi.mock("@/lib/auth/users.server", () => ({
 
 import {
   createSourcingSupplier,
+  provisionSupplierUser,
   updateSupplierSourcingStatus,
 } from "@/actions/sourcing";
 import { getEffectiveProfile } from "@/lib/auth";
 import { createClient } from "@/lib/app-client";
 import { createAdminClient } from "@/lib/admin-client";
 import { isSourcingTransitionAllowed } from "@/lib/sourcing-kanban-config";
+import { createAuthUserWithProfile } from "@/lib/auth/provision-user.server";
+import { emailExists } from "@/lib/auth/users.server";
 import { revalidatePath } from "next/cache";
 import {
   DEFAULT_SOURCING_STATUS,
@@ -96,13 +105,12 @@ function buildAppSupabaseMock(options: {
   return { from, insert, update, maybeSingle };
 }
 
-function buildAdminSupabaseMock(activeUserCount: number) {
+function buildAdminSupabaseMock(activeMemberCount: number) {
   const finalEq = vi.fn().mockResolvedValue({
-    count: activeUserCount,
+    count: activeMemberCount,
     error: null,
   });
-  const eq2 = vi.fn().mockReturnValue({ eq: finalEq });
-  const eq1 = vi.fn().mockReturnValue({ eq: eq2 });
+  const eq1 = vi.fn().mockReturnValue({ eq: finalEq });
   const select = vi.fn().mockReturnValue({ eq: eq1 });
   const from = vi.fn().mockReturnValue({ select });
   return { from };
@@ -223,5 +231,62 @@ describe("createSourcingSupplier", () => {
     });
     expect(revalidatePath).toHaveBeenCalledWith("/sourcing");
     expect(revalidatePath).toHaveBeenCalledWith("/admin/suppliers");
+  });
+});
+
+describe("provisionSupplierUser", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getEffectiveProfile).mockResolvedValue(seniorProfile);
+    vi.mocked(emailExists).mockResolvedValue(false);
+    vi.mocked(createAuthUserWithProfile).mockResolvedValue({
+      ok: true,
+      userId: "new-user-id",
+    });
+  });
+
+  it("creates auth profile with supplier_admin membership via helper", async () => {
+    const appSupabase = buildAppSupabaseMock({
+      selectResult: {
+        data: { id: supplierId, name: "ООО Тест" },
+        error: null,
+      },
+    });
+    vi.mocked(createClient).mockResolvedValue(appSupabase);
+    vi.mocked(createAdminClient).mockReturnValue(buildAdminSupabaseMock(0));
+
+    const result = await provisionSupplierUser(
+      supplierId,
+      "supplier@example.com",
+      "password123",
+    );
+
+    expect(result).toEqual({ ok: true, userId: "new-user-id" });
+    expect(createAuthUserWithProfile).toHaveBeenCalledWith({
+      email: "supplier@example.com",
+      password: "password123",
+      role: "supplier",
+      fullName: "ООО Тест",
+      supplierId,
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/sourcing");
+    expect(revalidatePath).toHaveBeenCalledWith("/admin/users");
+    expect(revalidatePath).toHaveBeenCalledWith("/admin/suppliers");
+  });
+
+  it("rejects when supplier already has active membership", async () => {
+    vi.mocked(createAdminClient).mockReturnValue(buildAdminSupabaseMock(1));
+
+    const result = await provisionSupplierUser(
+      supplierId,
+      "supplier@example.com",
+      "password123",
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: "У поставщика уже есть активный пользователь.",
+    });
+    expect(createAuthUserWithProfile).not.toHaveBeenCalled();
   });
 });

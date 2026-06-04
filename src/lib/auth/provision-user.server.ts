@@ -59,5 +59,23 @@ export async function createAuthUserWithProfile(params: {
     };
   }
 
+  if (params.role === "supplier" && params.supplierId) {
+    const { error: memberError } = await admin.from("supplier_members").insert({
+      user_id: userId,
+      supplier_id: params.supplierId,
+      member_role: "supplier_admin",
+      is_active: true,
+    });
+
+    if (memberError) {
+      await deleteAuthUser(userId);
+      return {
+        ok: false,
+        error: "Не удалось создать членство в организации поставщика.",
+        code: memberError.code,
+      };
+    }
+  }
+
   return { ok: true, userId };
 }

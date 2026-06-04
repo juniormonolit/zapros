@@ -1,33 +1,70 @@
 import { redirect } from "next/navigation";
 
-import type { Supplier } from "@/actions/admin-catalog-types";
-import { SupplierManager } from "@/components/admin/supplier-manager";
-import { getProfile } from "@/lib/auth";
-import { ensureRows } from "@/lib/db/types";
-import { createClient } from "@/lib/app-client";
+import {
+  listProductCatalog,
+  listSupplierRegions,
+  listSuppliers,
+} from "@/actions/supplier-org";
+import { SupplierOrgCreateForm } from "@/components/admin/supplier-org-create-form";
+import { SupplierOrgList } from "@/components/admin/supplier-org-list";
+import { getProfile, homeRouteForRole } from "@/lib/auth";
+import { canAccessSupplierOrgAdmin } from "@/lib/supplier-org-access";
+import {
+  filtersFromSearchParams,
+  toSupplierListFilters,
+} from "@/lib/supplier-list-filters";
+
+interface AdminSuppliersPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
 
 /**
- * Suppliers admin section. Access is gated three ways: middleware (route),
- * this server check (defense in depth), and database RLS (mutations). Reads
- * happen with the cookie-bound server client, which RLS allows for admin.
+ * Supplier organization list (F012 / SRC-708): table, filters, search.
+ * Access: admin and senior_procurement (Option A — procurement excluded).
  */
-export default async function AdminSuppliersPage() {
+export default async function AdminSuppliersPage({
+  searchParams,
+}: AdminSuppliersPageProps) {
   const profile = await getProfile();
-  if (!profile || profile.role !== "admin") {
-    redirect("/login");
+  if (!profile || !canAccessSupplierOrgAdmin(profile.role)) {
+    redirect(profile ? homeRouteForRole(profile.role) : "/login");
   }
 
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("suppliers")
-    .select(
-      "id, name, is_active, contact_person, phone, email, notes, sourcing_status, works_in_zapros, created_at",
-    )
-    .order("name", { ascending: true });
+  const params = await searchParams;
+  const filterValues = filtersFromSearchParams(params);
+  const filters = toSupplierListFilters(filterValues);
+
+  const [listResult, catalogResult, regionsResult] = await Promise.all([
+    listSuppliers(filters),
+    listProductCatalog(),
+    listSupplierRegions(),
+  ]);
+
+  const categories =
+    catalogResult.ok ? catalogResult.categories : [];
+  const brands = catalogResult.ok ? catalogResult.brands : [];
+  const regions = regionsResult.ok ? regionsResult.regions : [];
+
+  const listError =
+    !listResult.ok
+      ? listResult.error
+      : !catalogResult.ok
+        ? catalogResult.error
+        : !regionsResult.ok
+          ? regionsResult.error
+          : null;
 
   return (
-    <SupplierManager
-      suppliers={ensureRows(data) as unknown as Supplier[]}
-    />
+    <div className="flex flex-col gap-6">
+      <SupplierOrgCreateForm />
+      <SupplierOrgList
+        suppliers={listResult.ok ? listResult.suppliers : []}
+        categories={categories}
+        brands={brands}
+        regions={regions}
+        filters={filterValues}
+        error={listError}
+      />
+    </div>
   );
 }

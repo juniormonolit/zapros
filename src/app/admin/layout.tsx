@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 
 import { listUsersForViewAs } from "@/actions/view-as";
 import { ViewAsPicker } from "@/components/admin/view-as-picker";
-import { ADMIN_NAV, getAdminBoardNav } from "@/components/navigation/nav-config";
+import { getAdminBoardNav, getAdminNavForRole } from "@/components/navigation/nav-config";
 import { NavLinks } from "@/components/navigation/nav-links";
 import { Topbar } from "@/components/navigation/topbar";
 import { getProfile, homeRouteForRole } from "@/lib/auth";
@@ -23,12 +23,13 @@ export default async function AdminLayout({
     redirect("/login");
   }
 
-  if (profile.role !== "admin") {
+  if (profile.role !== "admin" && profile.role !== "senior_procurement") {
     redirect(homeRouteForRole(profile.role));
   }
 
-  const boardNav = getAdminBoardNav();
-  const viewAsEnabled = isAdminViewAsEnabled();
+  const adminNav = getAdminNavForRole(profile.role);
+  const boardNav = profile.role === "admin" ? getAdminBoardNav() : [];
+  const viewAsEnabled = profile.role === "admin" && isAdminViewAsEnabled();
   const [viewAsGroups, currentViewAsUserId] = viewAsEnabled
     ? await Promise.all([
         listUsersForViewAs(),
@@ -41,7 +42,7 @@ export default async function AdminLayout({
       <Topbar alignLogoWithSidebar />
       <div className="flex flex-1 flex-col md:flex-row">
         <aside className="hidden w-60 shrink-0 border-r border-border-primary bg-bg-card p-3 md:block">
-          <NavLinks items={ADMIN_NAV} orientation="vertical" />
+          <NavLinks items={adminNav} orientation="vertical" />
           {boardNav.length > 0 ? (
             <div className="mt-4 border-t border-border-primary pt-4">
               <p className="mb-2 px-3 text-xs font-medium tracking-wide text-text-secondary uppercase">
@@ -61,7 +62,7 @@ export default async function AdminLayout({
         </aside>
         <main className="flex-1 p-4 sm:p-6">
           <div className="-mx-4 mb-4 overflow-x-auto border-b border-border-primary px-4 md:hidden">
-            <NavLinks items={ADMIN_NAV} orientation="horizontal" />
+            <NavLinks items={adminNav} orientation="horizontal" />
             {boardNav.length > 0 ? (
               <div className="mt-3 border-t border-border-primary pt-3">
                 <p className="mb-2 text-xs font-medium tracking-wide text-text-secondary uppercase">

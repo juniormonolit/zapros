@@ -40,6 +40,9 @@ function buildWhere(filters: DbFilter[], params: unknown[]): string {
         return `$${params.length}`;
       });
       parts.push(`${quoteIdent(f.column)} in (${placeholders.join(", ")})`);
+    } else if (f.kind === "cs") {
+      params.push(f.value);
+      parts.push(`${quoteIdent(f.column)} @> $${params.length}::text[]`);
     } else if (f.kind === "not_null") {
       parts.push(`${quoteIdent(f.column)} is not null`);
     } else if (f.kind === "is_null") {
@@ -126,6 +129,12 @@ export class QueryBuilder implements PromiseLike<DbResult<DbRow | DbRow[] | null
 
   in(column: string, values: unknown[]): this {
     this.filters.push({ kind: "in", column, values });
+    return this;
+  }
+
+  /** Postgres array contains (`column @> value`). */
+  contains(column: string, value: unknown[]): this {
+    this.filters.push({ kind: "cs", column, value });
     return this;
   }
 

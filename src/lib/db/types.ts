@@ -8,6 +8,7 @@ export interface DbResult<T> {
 export type DbFilter =
   | { kind: "eq"; column: string; value: unknown }
   | { kind: "in"; column: string; values: unknown[] }
+  | { kind: "cs"; column: string; value: unknown[] }
   | { kind: "not_null"; column: string }
   | { kind: "is_null"; column: string };
 

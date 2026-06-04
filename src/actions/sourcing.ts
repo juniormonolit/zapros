@@ -75,9 +75,8 @@ function emptyToNull(raw: FormDataEntryValue | null): string | null {
 async function hasActiveSupplierUser(supplierId: string): Promise<boolean> {
   const admin = createAdminClient();
   const { count, error } = await admin
-    .from("profiles")
+    .from("supplier_members")
     .select("id", { count: "exact", head: true })
-    .eq("role", "supplier")
     .eq("supplier_id", supplierId)
     .eq("is_active", true);
 

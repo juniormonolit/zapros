@@ -58,3 +58,11 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   supplier: "Поставщик",
   senior_procurement: "Старший снабженец",
 };
+
+/** Admin nav filtered by role — senior_procurement sees suppliers only (SRC-708). */
+export function getAdminNavForRole(role: UserRole): NavItem[] {
+  if (role === "senior_procurement") {
+    return ADMIN_NAV.filter((item) => item.href === "/admin/suppliers");
+  }
+  return ADMIN_NAV;
+}
